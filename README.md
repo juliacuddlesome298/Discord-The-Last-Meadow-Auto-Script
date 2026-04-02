@@ -34,6 +34,11 @@ Automation script for The Last Meadow mini-games inside Discord.
    - macOS: `Cmd + Option + I`
 3. Open the **Console** tab.
 4. Paste the full script.
+   <details>
+      ```js
+         test
+      ```
+   </details>
 5. Press `Enter`.
 
 ## Stop the Script
