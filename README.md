@@ -597,7 +597,8 @@ You can tune behavior in the CFG object at the top of the script:
 ## Known issues
 
 - Battle automation only works for Archer and Paladin classes right now. Will add more later.
-- If game asks you to retry, calcel button is not yet automated.
+- Paladin battle mini-game sometimes may not be perfectly automated, some projectiles will reach the bottom. This behavior is designed by Discord. Sometimes it just can't be 100% accurate.
+- If game asks you to retry, cancel button is not yet automated.
 
 ## Disclaimer
 
