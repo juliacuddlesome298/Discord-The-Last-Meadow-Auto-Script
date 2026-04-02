@@ -563,9 +563,7 @@ Automation script for The Last Meadow mini-games inside Discord.
 
     tryContinue();
 
-    console.log("%c[The Last Meadow Auto Script] v21", "color:#00ff00;font-weight:bold;font-size:14px");
-    console.log("%cNo God Mode", "color:#88ccff");
-    console.log("%cReal mouse shield control is blocked in Paladin", "color:#88ccff");
+    console.log("%c[The Last Meadow Auto Script] v0.9", "color:#00ff00;font-weight:bold;font-size:14px");
     console.log("%cStop command: stopBot()", "color:#ff9900");
 })();
   ```
