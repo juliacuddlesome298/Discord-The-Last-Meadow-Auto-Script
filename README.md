@@ -4,7 +4,7 @@ Automation script for The Last Meadow mini-games inside Discord.
 
 ## Features
 
-- Auto-click Dragon activity targets
+- Auto-click Grass Toucher
 - Auto-click available Activity buttons (when no cooldown is active)
 - Auto-click Continue button
 - Archer mode:
@@ -14,7 +14,7 @@ Automation script for The Last Meadow mini-games inside Discord.
   - Auto-detects Paladin battle
   - Real-time shield tracking
   - Improved dual-projectile handling (prioritizes nearest threats, can center between top two)
-  - Blocks real mouse control during Paladin to prevent accidental shield drift
+  - Blocks real mouse control during Paladin to prevent accidental shield drift (may be broken)
 - Craft mode:
   - Auto-reads key sequence from UI
   - Sends key inputs automatically
