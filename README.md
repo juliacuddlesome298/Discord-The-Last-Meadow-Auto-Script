@@ -41,7 +41,8 @@ Automation script for The Last Meadow mini-games inside Discord.
 Run this in Console:
 
 ```js
-stopBot();```
+stopBot();
+```
 
 ## Configuration
 
