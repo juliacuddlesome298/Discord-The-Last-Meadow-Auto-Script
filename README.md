@@ -596,7 +596,7 @@ You can tune behavior in the CFG object at the top of the script:
 
 ## Known issues
 
-- Battle automation only works for Archer and Paladin modes as of now.
+- Battle automation only works for Archer and Paladin classes right now. Will add more later.
 - If game asks you to retry, calcel button is not yet automated.
 
 ## Disclaimer
