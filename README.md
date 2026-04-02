@@ -23,8 +23,7 @@ Automation script for The Last Meadow mini-games inside Discord.
 
 ## Requirements
 
-- Discord in a desktop browser (or webview with DevTools access)
-- Browser Developer Tools (Console tab)
+- Discord client (or via browser at discord.com/app)
 
 ## Quick Start
 
@@ -32,7 +31,8 @@ Automation script for The Last Meadow mini-games inside Discord.
 2. Open Developer Tools:
    - Windows/Linux: `Ctrl + Shift + I`
    - macOS: `Cmd + Option + I`
-3. Open the **Console** tab.
+   - Browser: `F12`
+3. Open the **Console** tab. Optional: if Discord doesn't let you to paste anything, type `allow pasting`
 4. Paste the full script.
 <details>
   <summary>Script</summary>
@@ -595,6 +595,11 @@ You can tune behavior in the CFG object at the top of the script:
 - The script relies on current Discord CSS class names.
 - If Discord updates class names, selectors may need to be updated.
 - Re-run the script after a page refresh or Discord update.
+
+## Known issues
+
+- Battle automation only works for Archer and Paladin modes as of now.
+- If game asks you to retry, calcel button is not yet automated.
 
 ## Disclaimer
 
