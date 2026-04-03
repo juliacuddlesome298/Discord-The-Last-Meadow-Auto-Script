@@ -46,6 +46,7 @@ Automation script for The Last Meadow mini-games inside Discord.
     } catch {}
 
     const ARCHER_HASH = "16fb25536f00a7996cbdf5bfff2ef0d09459f580af9e67d380263f5ead43055e";
+    const GO_BACK_BTN_SEL = ".button__65fca.buttonWhite__65fca.clickable__5c90e";
 
     const SEL = {
         target: ".targetContainer_b6b008",
@@ -79,8 +80,8 @@ Automation script for The Last Meadow mini-games inside Discord.
         palMinShieldW: 96,
         blockRealMouse: true,
 
-        goBackScanMs: 120,
-        goBackCooldownMs: 450
+        goBackScanMs: 60,
+        goBackCooldownMs: 250
     };
 
     const KEY_MAP = {
@@ -93,7 +94,6 @@ Automation script for The Last Meadow mini-games inside Discord.
     };
 
     const OUT_OF_RESOURCES_RE = /out of resources/i;
-    const GO_BACK_RE = /\bgo\s*back\b/i;
 
     const state = {
         mode: null,
@@ -168,41 +168,48 @@ Automation script for The Last Meadow mini-games inside Discord.
     }
 
     function hardClick(el) {
-        if (!el) return;
+        if (!el) return false;
 
         try {
             if (typeof el.focus === "function") el.focus({ preventScroll: true });
         } catch {}
 
         const r = el.getBoundingClientRect();
+        if (r.width < 2 || r.height < 2) return false;
+
         const clientX = r.left + r.width / 2;
         const clientY = r.top + r.height / 2;
 
-        const base = { bubbles: true, cancelable: true, view: window, clientX, clientY };
+        const under = document.elementFromPoint(clientX, clientY);
+        const targets = [el, under].filter(Boolean);
+
+        const base = { bubbles: true, cancelable: true, composed: true, view: window, clientX, clientY };
         const mDown = { ...base, button: 0, buttons: 1 };
         const mUp = { ...base, button: 0, buttons: 0 };
         const pDown = { ...mDown, pointerId: 1, pointerType: "mouse", isPrimary: true };
         const pUp = { ...mUp, pointerId: 1, pointerType: "mouse", isPrimary: true };
 
-        emitPointer(el, "pointerdown", pDown);
-        emitMouse(el, "mousedown", mDown);
-        emitPointer(el, "pointerup", pUp);
-        emitMouse(el, "mouseup", mUp);
-        emitMouse(el, "click", mUp);
-
-        try {
-            el.click();
-        } catch {}
-    }
-
-    function findGoBackButton(scope) {
-        const buttons = qa("[role='button'], button, .clickable__5c90e", scope);
-        for (const btn of buttons) {
-            if (!isVisible(btn)) continue;
-            const text = (btn.textContent || "").trim();
-            if (GO_BACK_RE.test(text)) return btn;
+        for (const t of targets) {
+            emitPointer(t, "pointerdown", pDown);
+            emitMouse(t, "mousedown", mDown);
         }
-        return null;
+        for (const t of targets) {
+            emitPointer(t, "pointerup", pUp);
+            emitMouse(t, "mouseup", mUp);
+            emitMouse(t, "click", mUp);
+        }
+
+        try { el.click(); } catch {}
+        try {
+            el.dispatchEvent(new KeyboardEvent("keydown", {
+                key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true, cancelable: true
+            }));
+            el.dispatchEvent(new KeyboardEvent("keyup", {
+                key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true, cancelable: true
+            }));
+        } catch {}
+
+        return true;
     }
 
     function tryClickGoBackModal() {
@@ -214,7 +221,6 @@ Automation script for The Last Meadow mini-games inside Discord.
             const text = (el.textContent || "").trim();
             return OUT_OF_RESOURCES_RE.test(text);
         });
-
         if (!warningNode) return false;
 
         const modalRoot =
@@ -224,11 +230,19 @@ Automation script for The Last Meadow mini-games inside Discord.
             warningNode.parentElement ||
             document;
 
-        const btn = findGoBackButton(modalRoot) || findGoBackButton(document);
+        let btn = q(GO_BACK_BTN_SEL, modalRoot);
+        if (btn && !isVisible(btn)) btn = null;
+
+        if (!btn) {
+            btn = qa(GO_BACK_BTN_SEL).find((b) => isVisible(b)) || null;
+        }
         if (!btn) return false;
 
         state.lastGoBackClickAt = now;
+
         hardClick(btn);
+        setTimeout(() => hardClick(btn), 60);
+
         console.log("%c[Modal] Go Back clicked", "color:#ffcc66;font-weight:bold");
         return true;
     }
@@ -648,7 +662,7 @@ Automation script for The Last Meadow mini-games inside Discord.
     tryClickGoBackModal();
     tryContinue();
 
-    console.log("%c[The Last Meadow Auto Script] v0.91", "color:#00ff00;font-weight:bold;font-size:14px");
+    console.log("%c[The Last Meadow Auto Script] v0.92", "color:#00ff00;font-weight:bold;font-size:14px");
     console.log("%cStop command: stopBot()", "color:#ff9900");
 })();
   ```
