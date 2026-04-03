@@ -5,22 +5,14 @@ Automation script for The Last Meadow mini-games inside Discord.
 ## Features
 
 - Auto-click Grass Toucher
-- Auto-click available Activity buttons (when no cooldown is active)
+- Auto-click available Activity buttons when no cooldown is active
 - Auto-click Continue button
-- Auto-click Go back button once Looks like we're out of resources :(. Once someone collects some more, try again! message appears
-- Archer mode:
-  - Auto-detects targets
-  - Fast target clicking
-- Paladin mode:
-  - Auto-detects Paladin battle
-  - Real-time shield tracking
-  - Improved dual-projectile handling (prioritizes nearest threats, can center between top two)
-  - Blocks real mouse control during Paladin to prevent accidental shield drift
-- Craft mode:
-  - Auto-reads key sequence from UI
-  - Sends key inputs automatically
-- Global stop command:
-  - `stopBot()`
+- Auto-click Go Back when the message Looks like we're out of resources :(. Once someone collects some more, try again! appears
+- Ranger mode: auto-detects targets and clicks them quickly
+- Paladin mode: auto-detects battle, tracks shield in real time, supports dual-projectile prioritization, blocks real mouse input inside Paladin arena
+- Priest mode: auto-detects 3x3 glyph board and solves triplets by grouping matching glyph signatures
+- Craft mode: reads and executes key sequences automatically
+- Global stop command: `stopBot()`
 
 ## Requirements
 
@@ -29,12 +21,10 @@ Automation script for The Last Meadow mini-games inside Discord.
 ## Quick Start
 
 1. Open Discord and navigate to The Last Meadow.
-2. Open Developer Tools:
-   - Windows/Linux: `Ctrl + Shift + I`
-   - macOS: `Cmd + Option + I`
-   - Browser: `F12`
-3. Open the **Console** tab. Optional: if Discord doesn't let you to paste anything, type `allow pasting`
-4. Paste the full script.
+2. Open Developer Tools. Windows/Linux: `Ctrl + Shift + I`. macOS: `Cmd + Option + I`.
+3. Open the Console tab. If paste is blocked, type `allow pasting` and press `Enter` button.
+4. Paste the script below.
+5. Press Enter.
 <details>
   <summary>Script</summary>
   
@@ -45,7 +35,7 @@ Automation script for The Last Meadow mini-games inside Discord.
         if (typeof window.stopBot === "function") window.stopBot();
     } catch {}
 
-    const ARCHER_HASH = "16fb25536f00a7996cbdf5bfff2ef0d09459f580af9e67d380263f5ead43055e";
+    const RANGER_HASH = "16fb25536f00a7996cbdf5bfff2ef0d09459f580af9e67d380263f5ead43055e";
     const GO_BACK_BTN_SEL = ".button__65fca.buttonWhite__65fca.clickable__5c90e";
 
     const SEL = {
@@ -57,10 +47,20 @@ Automation script for The Last Meadow mini-games inside Discord.
         activity: ".activityButton__8af73",
         cooldown: ".countdown__8af73",
 
+        // Paladin
         projectile: ".projectile_cce732",
         shield: ".shield_cce732",
         palRoot: ".container__24749, .game__24749, .shaker_cce732",
 
+        // Priest
+        priestGame: ".game__5c62c",
+        priestGrid: ".grid__0dcd3",
+        priestRow: ".gridRow__0dcd3",
+        priestItem: ".gridItem__0dcd3",
+        priestMatched: ".matched__0dcd3",
+        priestGlyph: ".gridAssetGlyph__0dcd3",
+
+        // Modal
         modalResourceText: ".text_a2a25a, .text-lg\\/normal_cf4812, [data-text-variant='text-lg/normal']"
     };
 
@@ -71,6 +71,7 @@ Automation script for The Last Meadow mini-games inside Discord.
         settleMs: 20,
         keyDelayMs: 70,
 
+        // Paladin
         palSmooth: 0.88,
         palAimY: 0.93,
         palTopDelta: 120,
@@ -80,6 +81,11 @@ Automation script for The Last Meadow mini-games inside Discord.
         palMinShieldW: 96,
         blockRealMouse: true,
 
+        // Priest
+        priestClickDelayMs: 28,
+        priestTripletDelayMs: 120,
+
+        // Go Back modal
         goBackScanMs: 60,
         goBackCooldownMs: 250
     };
@@ -94,13 +100,22 @@ Automation script for The Last Meadow mini-games inside Discord.
     };
 
     const OUT_OF_RESOURCES_RE = /out of resources/i;
+    const PRIEST_MATCHED_CLASS = "matched__0dcd3";
 
     const state = {
         mode: null,
+
+        // Paladin
         palRaf: 0,
         palDrag: false,
         palRoot: null,
         mouseLockHandler: null,
+
+        // Priest
+        priestRaf: 0,
+        priestBusy: false,
+
+        // Shared
         craftBusy: false,
         lastSeqKey: "",
         clickedContinue: new WeakSet(),
@@ -239,7 +254,6 @@ Automation script for The Last Meadow mini-games inside Discord.
         if (!btn) return false;
 
         state.lastGoBackClickAt = now;
-
         hardClick(btn);
         setTimeout(() => hardClick(btn), 60);
 
@@ -247,6 +261,7 @@ Automation script for The Last Meadow mini-games inside Discord.
         return true;
     }
 
+    // ---------- Battle detection ----------
     function getPaladinContext() {
         let best = null;
 
@@ -270,27 +285,35 @@ Automation script for The Last Meadow mini-games inside Discord.
         return best;
     }
 
+    function hasPriestBoard() {
+        const grid = q(SEL.priestGrid) || q(SEL.priestGame);
+        if (!grid) return false;
+        const items = qa(SEL.priestItem).filter(isVisible);
+        return items.length >= 3;
+    }
+
     function getBattleType() {
-        const pal = getPaladinContext();
-        if (pal) return "paladin";
+        // Priority: Paladin -> Priest -> Ranger
+        if (getPaladinContext()) return "paladin";
+        if (hasPriestBoard()) return "priest";
+        if (qa(SEL.target).some(isVisible)) return "ranger";
 
-        if (qa(SEL.target).some(isVisible)) return "archer";
-
+        // Fallback Ranger before entering battle
         for (const w of qa(SEL.activity)) {
             const img = w.querySelector("img.activityButtonAsset__8af73, img.asset__65fca");
-            if (img && img.src && img.src.includes(ARCHER_HASH)) return "archer";
+            if (img && img.src && img.src.includes(RANGER_HASH)) return "ranger";
         }
 
         return null;
     }
 
-    // Dragon
+    // ---------- Grass Toucher ----------
     const dragonBot = setInterval(() => {
         const el = q(".dragonClickable__8e80e") || q('img[alt="Grass Toucher"]');
         if (el) el.click();
     }, CFG.dragonMs);
 
-    // Activity buttons
+    // ---------- Activity ----------
     const activityBot = setInterval(() => {
         for (const wrapper of qa(SEL.activity)) {
             if (q(SEL.cooldown, wrapper)) continue;
@@ -298,12 +321,12 @@ Automation script for The Last Meadow mini-games inside Discord.
         }
     }, CFG.activityMs);
 
-    // Modal quick watcher
+    // ---------- Modal watcher ----------
     const goBackBot = setInterval(() => {
         tryClickGoBackModal();
     }, CFG.goBackScanMs);
 
-    // Continue
+    // ---------- Continue ----------
     function tryContinue() {
         const btn = q(SEL.cont);
         if (!btn || state.clickedContinue.has(btn)) return;
@@ -312,7 +335,7 @@ Automation script for The Last Meadow mini-games inside Discord.
         console.log("%c[Continue] Clicked", "color:#aaffff;font-weight:bold");
     }
 
-    // Archer
+    // ---------- Ranger ----------
     const hitTargets = new WeakSet();
 
     function fireTarget(el) {
@@ -335,7 +358,7 @@ Automation script for The Last Meadow mini-games inside Discord.
         setTimeout(() => fireTarget(el), CFG.settleMs);
     }
 
-    // Craft
+    // ---------- Craft ----------
     async function doSequence(seqEl) {
         const keys = qa(SEL.char, seqEl)
             .map((img) => normalizeKeyName(img.getAttribute("alt")))
@@ -362,7 +385,7 @@ Automation script for The Last Meadow mini-games inside Discord.
         state.craftBusy = false;
     }
 
-    // Paladin helpers
+    // ---------- Paladin ----------
     function getShieldWidthLogical(shield) {
         return Math.max(
             CFG.palMinShieldW,
@@ -399,7 +422,7 @@ Automation script for The Last Meadow mini-games inside Discord.
         return list;
     }
 
-    function chooseTarget(threats, shieldW) {
+    function choosePaladinTarget(threats, shieldW) {
         if (!threats.length) return null;
         const a = threats[0];
         const b = threats[1];
@@ -431,7 +454,7 @@ Automation script for The Last Meadow mini-games inside Discord.
         };
     }
 
-    function getInputTargets(ctx) {
+    function getPaladinInputTargets(ctx) {
         return [ctx.shield, ctx.root, document, document.body, window];
     }
 
@@ -440,7 +463,7 @@ Automation script for The Last Meadow mini-games inside Discord.
         const m = { ...base, button: 0, buttons: 1 };
         const p = { ...m, pointerId: 1, pointerType: "mouse", isPrimary: true };
 
-        for (const t of getInputTargets(ctx)) {
+        for (const t of getPaladinInputTargets(ctx)) {
             emitPointer(t, "pointerdown", p);
             emitMouse(t, "mousedown", m);
         }
@@ -452,7 +475,7 @@ Automation script for The Last Meadow mini-games inside Discord.
         const base = { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y, buttons: 1 };
         const p = { ...base, pointerId: 1, pointerType: "mouse", isPrimary: true };
 
-        for (const t of getInputTargets(ctx)) {
+        for (const t of getPaladinInputTargets(ctx)) {
             emitPointer(t, "pointermove", p);
             emitMouse(t, "mousemove", base);
         }
@@ -530,22 +553,21 @@ Automation script for The Last Meadow mini-games inside Discord.
         if (!threats.length) return;
 
         const shieldW = getShieldWidthLogical(ctx.shield);
-        const target = chooseTarget(threats, shieldW);
+        const target = choosePaladinTarget(threats, shieldW);
         if (!target) return;
 
         // Direct style fallback
         if (target.logicalCenter !== null) {
             const currentLeft = num(ctx.shield.style.left);
             const desiredLeft = target.logicalCenter - shieldW / 2;
-            const nextLeft = currentLeft === null
-                ? desiredLeft
-                : currentLeft + (desiredLeft - currentLeft) * CFG.palSmooth;
+            const nextLeft =
+                currentLeft === null ? desiredLeft : currentLeft + (desiredLeft - currentLeft) * CFG.palSmooth;
 
             ctx.shield.style.setProperty("left", `${nextLeft}px`, "important");
             ctx.shield.style.setProperty("transform", "none", "important");
         }
 
-        // Virtual pointer feed for internal game logic
+        // Virtual pointer feed
         const x = target.clientCenter;
         const y = ctx.rect.top + ctx.rect.height * CFG.palAimY;
 
@@ -575,6 +597,90 @@ Automation script for The Last Meadow mini-games inside Discord.
         state.palRoot = null;
     }
 
+    // ---------- Priest ----------
+    function getPriestGlyphSignature(tile) {
+        const glyphRoot = q(SEL.priestGlyph, tile) || q(".gridAssetFront__0dcd3 svg", tile) || q("svg", tile);
+        if (!glyphRoot) return null;
+
+        const paths = qa("path", glyphRoot).map((p) => p.getAttribute("d") || "").join("|");
+        if (paths && paths.length > 12) return paths;
+
+        const html = (glyphRoot.innerHTML || "").replace(/\s+/g, "");
+        return html || null;
+    }
+
+    function buildPriestGroups() {
+        const items = qa(SEL.priestItem).filter((el) => isVisible(el) && !el.classList.contains(PRIEST_MATCHED_CLASS));
+        const bySig = new Map();
+
+        for (const item of items) {
+            const sig = getPriestGlyphSignature(item);
+            if (!sig) continue;
+            if (!bySig.has(sig)) bySig.set(sig, []);
+            bySig.get(sig).push(item);
+        }
+
+        return Array.from(bySig.values())
+            .filter((g) => g.length >= 3)
+            .map((g) => g.slice(0, 3));
+    }
+
+    async function solvePriestBoardOnce() {
+        if (state.priestBusy || state.mode !== "priest") return;
+        state.priestBusy = true;
+
+        try {
+            const groups = buildPriestGroups();
+            if (!groups.length) return;
+
+            for (const group of groups) {
+                if (state.mode !== "priest") break;
+
+                const live = group.filter(
+                    (el) => document.contains(el) && isVisible(el) && !el.classList.contains(PRIEST_MATCHED_CLASS)
+                );
+                if (live.length < 3) continue;
+
+                for (const tile of live) {
+                    if (state.mode !== "priest") break;
+                    hardClick(tile);
+                    await sleep(CFG.priestClickDelayMs);
+                }
+
+                await sleep(CFG.priestTripletDelayMs);
+            }
+        } finally {
+            state.priestBusy = false;
+        }
+    }
+
+    function priestTick() {
+        if (state.mode !== "priest") return;
+        if (!hasPriestBoard()) return;
+        solvePriestBoardOnce();
+    }
+
+    function priestLoop() {
+        priestTick();
+        state.priestRaf = requestAnimationFrame(priestLoop);
+    }
+
+    function startPriestBot() {
+        if (state.priestRaf) return;
+        state.priestBusy = false;
+        state.priestRaf = requestAnimationFrame(priestLoop);
+        console.log("%c[Priest] Bot started", "color:#a3ffcc;font-weight:bold");
+    }
+
+    function stopPriestBot() {
+        if (state.priestRaf) {
+            cancelAnimationFrame(state.priestRaf);
+            state.priestRaf = 0;
+        }
+        state.priestBusy = false;
+    }
+
+    // ---------- Mode switch ----------
     function checkBattleMode() {
         const mode = getBattleType();
         if (mode === state.mode) return;
@@ -582,18 +688,28 @@ Automation script for The Last Meadow mini-games inside Discord.
         state.mode = mode;
 
         if (mode === "paladin") {
+            stopPriestBot();
             startPaladinBot();
             console.log("%c[Battle] PALADIN mode", "color:#88aaff;font-weight:bold");
             return;
         }
 
-        stopPaladinBot();
+        if (mode === "priest") {
+            stopPaladinBot();
+            startPriestBot();
+            console.log("%c[Battle] PRIEST mode", "color:#a3ffcc;font-weight:bold");
+            return;
+        }
 
-        if (mode === "archer") {
-            console.log("%c[Battle] ARCHER mode", "color:#00ff88;font-weight:bold");
+        stopPaladinBot();
+        stopPriestBot();
+
+        if (mode === "ranger") {
+            console.log("%c[Battle] RANGER mode", "color:#00ff88;font-weight:bold");
         }
     }
 
+    // ---------- Observer ----------
     const observer = new MutationObserver((muts) => {
         tryClickGoBackModal();
         checkBattleMode();
@@ -610,10 +726,21 @@ Automation script for The Last Meadow mini-games inside Discord.
 
                 if (node.matches?.(SEL.cont) || node.querySelector?.(SEL.cont)) tryContinue();
 
-                // Fast immediate response to freshly spawned projectiles
+                // Fast reaction Paladin
                 if (state.mode === "paladin") {
                     if (node.matches?.(SEL.projectile) || node.querySelector?.(SEL.projectile)) {
                         paladinTick();
+                    }
+                }
+
+                // Fast reaction Priest
+                if (state.mode === "priest") {
+                    if (
+                        node.matches?.(SEL.priestItem) ||
+                        node.matches?.(SEL.priestGrid) ||
+                        node.querySelector?.(SEL.priestItem)
+                    ) {
+                        priestTick();
                     }
                 }
             }
@@ -628,6 +755,7 @@ Automation script for The Last Meadow mini-games inside Discord.
 
     observer.observe(document.body, { childList: true, subtree: true });
 
+    // ---------- Poll ----------
     const poll = setInterval(() => {
         tryClickGoBackModal();
         checkBattleMode();
@@ -638,9 +766,12 @@ Automation script for The Last Meadow mini-games inside Discord.
         if (seq) doSequence(seq);
         else state.lastSeqKey = "";
 
+        if (state.mode === "priest") priestTick();
+
         tryContinue();
     }, CFG.pollMs);
 
+    // ---------- Stop ----------
     window.stopBot = () => {
         clearInterval(dragonBot);
         clearInterval(activityBot);
@@ -648,12 +779,13 @@ Automation script for The Last Meadow mini-games inside Discord.
         clearInterval(poll);
 
         stopPaladinBot();
+        stopPriestBot();
         observer.disconnect();
 
         console.log("%c[BOT] Stopped", "color:red;font-weight:bold");
     };
 
-    // Init
+    // ---------- Init ----------
     checkBattleMode();
 
     const initSeq = q(SEL.seq);
@@ -662,13 +794,12 @@ Automation script for The Last Meadow mini-games inside Discord.
     tryClickGoBackModal();
     tryContinue();
 
-    console.log("%c[The Last Meadow Auto Script] v0.92", "color:#00ff00;font-weight:bold;font-size:14px");
+    console.log("%c[The Last Meadow Auto Script] v1.0", "color:#00ff00;font-weight:bold;font-size:14px");
     console.log("%cStop command: stopBot()", "color:#ff9900");
 })();
   ```
   
 </details>
-5. Press `Enter`.
 
 ## Stop the Script
 
@@ -680,12 +811,16 @@ stopBot();
 
 ## Configuration
 
-You can tune behavior in the CFG object at the top of the script:
+You can tune behavior in the `CFG` object:
 
-- POLL_MS - main polling interval
-- PALADIN_SECONDARY_TOP_DELTA - how close the second projectile must be to become dual-priority
-- PALADIN_DUAL_COVER_RATIO - whether shield should center between two close threats
-- KEY_DELAY_MS - delay between Craft key inputs
+- `pollMs` for the main polling interval
+- `keyDelayMs` for Craft key delay
+- `palTopDelta` for Paladin second-projectile priority threshold
+- `palDualCoverRatio` for Paladin dual-projectile center behavior
+- `priestClickDelayMs` for Priest tile click cadence
+- `priestTripletDelayMs` for Priest post-triplet spacing
+- `goBackScanMs` for Go Back modal scan interval
+- `goBackCooldownMs` for Go Back click debounce
 
 ## Notes
 
@@ -695,8 +830,7 @@ You can tune behavior in the CFG object at the top of the script:
 
 ## Known issues
 
-- Battle automation only works for Archer and Paladin classes right now. Will add more later.
-- Paladin battle mini-game sometimes may not be perfectly automated, some projectiles will reach the bottom. This behavior is designed by Discord. Sometimes it just can't be 100% accurate.
+- Paladin can still occasionally miss a projectile due to game timing and browser frame scheduling.
 
 ## Disclaimer
 
