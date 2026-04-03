@@ -7,6 +7,7 @@ Automation script for The Last Meadow mini-games inside Discord.
 - Auto-click Grass Toucher
 - Auto-click available Activity buttons (when no cooldown is active)
 - Auto-click Continue button
+- Auto-click Go back button once Looks like we're out of resources :(. Once someone collects some more, try again! message appears
 - Archer mode:
   - Auto-detects targets
   - Fast target clicking
@@ -38,7 +39,7 @@ Automation script for The Last Meadow mini-games inside Discord.
   <summary>Script</summary>
   
   ```javascript
-  (function () {
+(function () {
     // Stop previous instance if present
     try {
         if (typeof window.stopBot === "function") window.stopBot();
@@ -57,7 +58,9 @@ Automation script for The Last Meadow mini-games inside Discord.
 
         projectile: ".projectile_cce732",
         shield: ".shield_cce732",
-        palRoot: ".container__24749, .game__24749, .shaker_cce732"
+        palRoot: ".container__24749, .game__24749, .shaker_cce732",
+
+        modalResourceText: ".text_a2a25a, .text-lg\\/normal_cf4812, [data-text-variant='text-lg/normal']"
     };
 
     const CFG = {
@@ -74,7 +77,10 @@ Automation script for The Last Meadow mini-games inside Discord.
         palDefaultShieldW: 138,
         palDefaultProjW: 115,
         palMinShieldW: 96,
-        blockRealMouse: true
+        blockRealMouse: true,
+
+        goBackScanMs: 120,
+        goBackCooldownMs: 450
     };
 
     const KEY_MAP = {
@@ -86,6 +92,9 @@ Automation script for The Last Meadow mini-games inside Discord.
         Space: { key: " ", code: "Space", keyCode: 32, which: 32 }
     };
 
+    const OUT_OF_RESOURCES_RE = /out of resources/i;
+    const GO_BACK_RE = /\bgo\s*back\b/i;
+
     const state = {
         mode: null,
         palRaf: 0,
@@ -94,7 +103,8 @@ Automation script for The Last Meadow mini-games inside Discord.
         mouseLockHandler: null,
         craftBusy: false,
         lastSeqKey: "",
-        clickedContinue: new WeakSet()
+        clickedContinue: new WeakSet(),
+        lastGoBackClickAt: 0
     };
 
     const q = (s, r = document) => r.querySelector(s);
@@ -140,6 +150,87 @@ Automation script for The Last Meadow mini-games inside Discord.
             target.dispatchEvent(new KeyboardEvent("keypress", opts));
             target.dispatchEvent(new KeyboardEvent("keyup", opts));
         } catch {}
+    }
+
+    function emitPointer(target, type, opts) {
+        if (!target || typeof target.dispatchEvent !== "function") return;
+        if (typeof PointerEvent !== "function") return;
+        try {
+            target.dispatchEvent(new PointerEvent(type, opts));
+        } catch {}
+    }
+
+    function emitMouse(target, type, opts) {
+        if (!target || typeof target.dispatchEvent !== "function") return;
+        try {
+            target.dispatchEvent(new MouseEvent(type, opts));
+        } catch {}
+    }
+
+    function hardClick(el) {
+        if (!el) return;
+
+        try {
+            if (typeof el.focus === "function") el.focus({ preventScroll: true });
+        } catch {}
+
+        const r = el.getBoundingClientRect();
+        const clientX = r.left + r.width / 2;
+        const clientY = r.top + r.height / 2;
+
+        const base = { bubbles: true, cancelable: true, view: window, clientX, clientY };
+        const mDown = { ...base, button: 0, buttons: 1 };
+        const mUp = { ...base, button: 0, buttons: 0 };
+        const pDown = { ...mDown, pointerId: 1, pointerType: "mouse", isPrimary: true };
+        const pUp = { ...mUp, pointerId: 1, pointerType: "mouse", isPrimary: true };
+
+        emitPointer(el, "pointerdown", pDown);
+        emitMouse(el, "mousedown", mDown);
+        emitPointer(el, "pointerup", pUp);
+        emitMouse(el, "mouseup", mUp);
+        emitMouse(el, "click", mUp);
+
+        try {
+            el.click();
+        } catch {}
+    }
+
+    function findGoBackButton(scope) {
+        const buttons = qa("[role='button'], button, .clickable__5c90e", scope);
+        for (const btn of buttons) {
+            if (!isVisible(btn)) continue;
+            const text = (btn.textContent || "").trim();
+            if (GO_BACK_RE.test(text)) return btn;
+        }
+        return null;
+    }
+
+    function tryClickGoBackModal() {
+        const now = Date.now();
+        if (now - state.lastGoBackClickAt < CFG.goBackCooldownMs) return false;
+
+        const warningNode = qa(SEL.modalResourceText).find((el) => {
+            if (!isVisible(el)) return false;
+            const text = (el.textContent || "").trim();
+            return OUT_OF_RESOURCES_RE.test(text);
+        });
+
+        if (!warningNode) return false;
+
+        const modalRoot =
+            warningNode.closest("[role='dialog']") ||
+            warningNode.closest("[class*='modal']") ||
+            warningNode.closest("[class*='layer']") ||
+            warningNode.parentElement ||
+            document;
+
+        const btn = findGoBackButton(modalRoot) || findGoBackButton(document);
+        if (!btn) return false;
+
+        state.lastGoBackClickAt = now;
+        hardClick(btn);
+        console.log("%c[Modal] Go Back clicked", "color:#ffcc66;font-weight:bold");
+        return true;
     }
 
     function getPaladinContext() {
@@ -192,6 +283,11 @@ Automation script for The Last Meadow mini-games inside Discord.
             q(SEL.clickable, wrapper)?.click();
         }
     }, CFG.activityMs);
+
+    // Modal quick watcher
+    const goBackBot = setInterval(() => {
+        tryClickGoBackModal();
+    }, CFG.goBackScanMs);
 
     // Continue
     function tryContinue() {
@@ -319,21 +415,6 @@ Automation script for The Last Meadow mini-games inside Discord.
             logicalCenter: a.logicalCenter,
             clientCenter: a.clientCenter
         };
-    }
-
-    function emitPointer(target, type, opts) {
-        if (!target || typeof target.dispatchEvent !== "function") return;
-        if (typeof PointerEvent !== "function") return;
-        try {
-            target.dispatchEvent(new PointerEvent(type, opts));
-        } catch {}
-    }
-
-    function emitMouse(target, type, opts) {
-        if (!target || typeof target.dispatchEvent !== "function") return;
-        try {
-            target.dispatchEvent(new MouseEvent(type, opts));
-        } catch {}
     }
 
     function getInputTargets(ctx) {
@@ -500,6 +581,7 @@ Automation script for The Last Meadow mini-games inside Discord.
     }
 
     const observer = new MutationObserver((muts) => {
+        tryClickGoBackModal();
         checkBattleMode();
 
         for (const m of muts) {
@@ -533,6 +615,7 @@ Automation script for The Last Meadow mini-games inside Discord.
     observer.observe(document.body, { childList: true, subtree: true });
 
     const poll = setInterval(() => {
+        tryClickGoBackModal();
         checkBattleMode();
 
         qa(SEL.target).forEach(tryTarget);
@@ -547,6 +630,7 @@ Automation script for The Last Meadow mini-games inside Discord.
     window.stopBot = () => {
         clearInterval(dragonBot);
         clearInterval(activityBot);
+        clearInterval(goBackBot);
         clearInterval(poll);
 
         stopPaladinBot();
@@ -561,9 +645,10 @@ Automation script for The Last Meadow mini-games inside Discord.
     const initSeq = q(SEL.seq);
     if (initSeq) doSequence(initSeq);
 
+    tryClickGoBackModal();
     tryContinue();
 
-    console.log("%c[The Last Meadow Auto Script] v0.9", "color:#00ff00;font-weight:bold;font-size:14px");
+    console.log("%c[The Last Meadow Auto Script] v0.91", "color:#00ff00;font-weight:bold;font-size:14px");
     console.log("%cStop command: stopBot()", "color:#ff9900");
 })();
   ```
@@ -598,7 +683,6 @@ You can tune behavior in the CFG object at the top of the script:
 
 - Battle automation only works for Archer and Paladin classes right now. Will add more later.
 - Paladin battle mini-game sometimes may not be perfectly automated, some projectiles will reach the bottom. This behavior is designed by Discord. Sometimes it just can't be 100% accurate.
-- If game asks you to retry, cancel button is not yet automated.
 
 ## Disclaimer
 
