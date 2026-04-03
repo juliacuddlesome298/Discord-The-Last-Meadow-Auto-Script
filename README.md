@@ -7,7 +7,7 @@ Automation script for The Last Meadow mini-games inside Discord.
 - Auto-click Grass Toucher
 - Auto-click available Activity buttons when no cooldown is active
 - Auto-click Continue button
-- Auto-click Go Back when the message Looks like we're out of resources :(. Once someone collects some more, try again! appears
+- Auto-click Go Back when the message `Looks like we're out of resources :(. Once someone collects some more, try again!` appears
 - Ranger mode: auto-detects targets and clicks them quickly
 - Paladin mode: auto-detects battle, tracks shield in real time, supports dual-projectile prioritization, blocks real mouse input inside Paladin arena
 - Priest mode: auto-detects 3x3 glyph board and solves triplets by grouping matching glyph signatures
