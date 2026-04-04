@@ -73,6 +73,11 @@ Automation script for The Last Meadow mini-games inside Discord.
         settleMs: 20,
         keyDelayMs: 70,
         craftRetrySameSeqMs: 700,
+        craftPostKeySettleMs: 30,
+        craftStepAckTimeoutMs: 280,
+        craftStepPollMs: 20,
+        craftRetryWholeMax: 3,
+        craftRetryBackoffMs: 140,
 
         // Paladin
         palSmooth: 1,
@@ -185,14 +190,17 @@ Automation script for The Last Meadow mini-games inside Discord.
     }
 
     function dispatchSafe(target, ctorName, type, options) {
-        if (!target || typeof target.dispatchEvent !== "function") return;
+        if (!target || typeof target.dispatchEvent !== "function") return false;
 
         const EventCtor = resolveEventCtor(target, ctorName);
-        if (typeof EventCtor !== "function") return;
+        if (typeof EventCtor !== "function") return false;
 
         try {
             target.dispatchEvent(new EventCtor(type, options));
-        } catch {}
+            return true;
+        } catch {
+            return false;
+        }
     }
 
     function emitPointer(target, type, options) {
@@ -204,13 +212,13 @@ Automation script for The Last Meadow mini-games inside Discord.
     }
 
     function sendKey(target, keyName) {
-        if (!target) return;
+        if (!target) return 0;
 
         const key = normalizeKeyName(keyName);
-        if (!key) return;
+        if (!key) return 0;
 
         const definition = KEY_MAP[key];
-        if (!definition) return;
+        if (!definition) return 0;
 
         const options = {
             bubbles: true,
@@ -224,9 +232,12 @@ Automation script for The Last Meadow mini-games inside Discord.
             isComposing: false,
             ...definition
         };
-        dispatchSafe(target, "KeyboardEvent", "keydown", options);
-        dispatchSafe(target, "KeyboardEvent", "keypress", options);
-        dispatchSafe(target, "KeyboardEvent", "keyup", options);
+
+        let sent = 0;
+        sent += dispatchSafe(target, "KeyboardEvent", "keydown", options) ? 1 : 0;
+        sent += dispatchSafe(target, "KeyboardEvent", "keypress", options) ? 1 : 0;
+        sent += dispatchSafe(target, "KeyboardEvent", "keyup", options) ? 1 : 0;
+        return sent;
     }
 
     function hardClick(el) {
@@ -434,58 +445,168 @@ Automation script for The Last Meadow mini-games inside Discord.
     }
 
     // ---------- Craft ----------
-    async function doSequence(seqEl) {
-        const keys = queryAll(SELECTORS.char, seqEl)
+    function keysEqual(a, b) {
+        if (!Array.isArray(a) || !Array.isArray(b)) return false;
+        if (a.length !== b.length) return false;
+        for (let i = 0; i < a.length; i++) {
+            if (a[i] !== b[i]) return false;
+        }
+        return true;
+    }
+
+    function isCraftArrowSuccess(img) {
+        const classes = Array.from(img?.classList || []);
+        return classes.some((cls) => cls === "arrowSuccess__34527" || cls.startsWith("arrowSuccess__"));
+    }
+
+    function getLiveSequenceElement(seqHint) {
+        if (seqHint instanceof Element && document.contains(seqHint)) {
+            if (seqHint.matches?.(SELECTORS.seq)) return seqHint;
+
+            const closest = seqHint.closest?.(SELECTORS.seq);
+            if (closest && document.contains(closest)) return closest;
+        }
+
+        return queryOne(SELECTORS.seq);
+    }
+
+    function readPendingSequenceKeys(seqHint) {
+        const seq = getLiveSequenceElement(seqHint);
+        if (!seq) return [];
+
+        return queryAll(SELECTORS.char, seq)
+            .filter((img) => !isCraftArrowSuccess(img))
             .map((img) => normalizeKeyName(img.getAttribute("alt")))
             .filter((name) => KEY_MAP[name]);
+    }
 
-        if (!keys.length) return;
+    async function waitForSequenceChange(beforeKeys, seqHint) {
+        const startedAt = performance.now();
 
-        const seqKey = keys.join(",");
+        while (performance.now() - startedAt <= CONFIG.craftStepAckTimeoutMs) {
+            const nowKeys = readPendingSequenceKeys(seqHint);
+            if (!keysEqual(nowKeys, beforeKeys)) {
+                return { changed: true, keys: nowKeys };
+            }
+            await delay(CONFIG.craftStepPollMs);
+        }
+
+        return { changed: false, keys: readPendingSequenceKeys(seqHint) };
+    }
+
+    function sendCraftKeyEverywhere(key) {
+        let targetsDelivered = 0;
+
+        try {
+            if (sendKey(document, key) > 0) targetsDelivered++;
+        } catch (e) {
+            console.warn("%c[Craft] Failed to send to document:", "color:#ffaa00", e.message);
+        }
+
+        try {
+            if (sendKey(document.body, key) > 0) targetsDelivered++;
+        } catch (e) {
+            console.warn("%c[Craft] Failed to send to body:", "color:#ffaa00", e.message);
+        }
+
+        const active = document.activeElement;
+        if (active && active !== document.body && document.contains(active)) {
+            try {
+                if (sendKey(active, key) > 0) targetsDelivered++;
+            } catch (e) {
+                console.warn("%c[Craft] Failed to send to activeElement:", "color:#ffaa00", e.message);
+            }
+        }
+
+        return targetsDelivered;
+    }
+
+    async function runCraftAttempt(keys, attempt, seqHint) {
+        console.log(
+            `%c[Craft] Attempt ${attempt}/${CONFIG.craftRetryWholeMax}:`,
+            "color:#66ffcc;font-weight:bold",
+            keys.join(" -> ")
+        );
+
+        for (let i = 0; i < keys.length; i++) {
+            const expectedKey = keys[i];
+            const beforeKeys = readPendingSequenceKeys(seqHint);
+
+            if (!beforeKeys.length) {
+                return { ok: true, reason: "sequence already resolved" };
+            }
+
+            if (beforeKeys[0] !== expectedKey) {
+                return {
+                    ok: false,
+                    reason: `desync before step ${i + 1}: expected ${expectedKey}, got ${beforeKeys[0] || "<none>"}`
+                };
+            }
+
+            const delivered = sendCraftKeyEverywhere(expectedKey);
+            if (delivered === 0) {
+                return { ok: false, reason: `no target accepted key ${expectedKey}` };
+            }
+
+            await delay(CONFIG.craftPostKeySettleMs);
+
+            const ack = await waitForSequenceChange(beforeKeys, seqHint);
+            if (!ack.changed) {
+                return {
+                    ok: false,
+                    reason: `no sequence change after key ${expectedKey}`
+                };
+            }
+
+            await delay(CONFIG.keyDelayMs);
+        }
+
+        return { ok: true, reason: "attempt completed" };
+    }
+
+    async function doSequence(seqEl) {
+        if (state.craftBusy) return;
+
+        const initialKeys = readPendingSequenceKeys(seqEl);
+        if (!initialKeys.length) return;
+
+        const seqKey = initialKeys.join(",");
         const now = Date.now();
         const sameSeqCooldownLeft = CONFIG.craftRetrySameSeqMs - (now - state.lastSeqSentAt);
 
-        if (state.craftBusy) return;
         if (seqKey === state.lastSeqKey && sameSeqCooldownLeft > 0) return;
 
         state.craftBusy = true;
         state.lastSeqKey = seqKey;
         state.lastSeqSentAt = now;
 
-        console.log("%c[Craft] Sequence:", "color:#ffff00;font-weight:bold", keys.join(" -> "));
-
         try {
-            for (const key of keys) {
-                let sent = 0;
-                try {
-                    sendKey(document, key);
-                    sent++;
-                } catch (e) {
-                    console.warn("%c[Craft] Failed to send to document:", "color:#ffaa00", e.message);
+            let solved = false;
+
+            for (let attempt = 1; attempt <= CONFIG.craftRetryWholeMax; attempt++) {
+                const keys = readPendingSequenceKeys(seqEl);
+                if (!keys.length) {
+                    solved = true;
+                    break;
                 }
 
-                try {
-                    sendKey(document.body, key);
-                    sent++;
-                } catch (e) {
-                    console.warn("%c[Craft] Failed to send to body:", "color:#ffaa00", e.message);
+                const result = await runCraftAttempt(keys, attempt, seqEl);
+                if (result.ok) {
+                    solved = true;
+                    break;
                 }
 
-                const active = document.activeElement;
-                if (active && active !== document.body && document.contains(active)) {
-                    try {
-                        sendKey(active, key);
-                        sent++;
-                    } catch (e) {
-                        console.warn("%c[Craft] Failed to send to activeElement:", "color:#ffaa00", e.message);
-                    }
-                }
+                console.warn("%c[Craft] Attempt failed:", "color:#ffaa00;font-weight:bold", result.reason);
 
-                if (sent === 0) {
-                    console.warn("%c[Craft] WARNING: No targets received key '%s'", "color:#ff6600", key);
+                if (attempt < CONFIG.craftRetryWholeMax) {
+                    await delay(CONFIG.craftRetryBackoffMs);
                 }
+            }
 
-                await delay(CONFIG.keyDelayMs);
+            if (!solved) {
+                console.warn("%c[Craft] Full sequence retries exhausted", "color:#ff6600;font-weight:bold");
+                state.lastSeqKey = "";
+                state.lastSeqSentAt = 0;
             }
         } finally {
             state.craftBusy = false;
