@@ -29,7 +29,7 @@ Automation script for The Last Meadow mini-games inside Discord.
   <summary>Script</summary>
   
   ```javascript
-  (function () {
+(function () {
     "use strict";
 
     // Stop previous instance if present.
@@ -72,6 +72,7 @@ Automation script for The Last Meadow mini-games inside Discord.
         pollMs: 25,
         settleMs: 20,
         keyDelayMs: 70,
+        craftRetrySameSeqMs: 700,
 
         // Paladin
         palSmooth: 1,
@@ -129,6 +130,7 @@ Automation script for The Last Meadow mini-games inside Discord.
         // Shared
         craftBusy: false,
         lastSeqKey: "",
+        lastSeqSentAt: 0,
         clickedContinue: new WeakSet(),
         lastGoBackClickAt: 0,
 
@@ -420,10 +422,15 @@ Automation script for The Last Meadow mini-games inside Discord.
         if (!keys.length) return;
 
         const seqKey = keys.join(",");
-        if (state.craftBusy || seqKey === state.lastSeqKey) return;
+        const now = Date.now();
+        const sameSeqCooldownLeft = CONFIG.craftRetrySameSeqMs - (now - state.lastSeqSentAt);
+
+        if (state.craftBusy) return;
+        if (seqKey === state.lastSeqKey && sameSeqCooldownLeft > 0) return;
 
         state.craftBusy = true;
         state.lastSeqKey = seqKey;
+        state.lastSeqSentAt = now;
 
         console.log("%c[Craft] Sequence:", "color:#ffff00;font-weight:bold", keys.join(" -> "));
 
@@ -895,7 +902,10 @@ Automation script for The Last Meadow mini-games inside Discord.
 
         const seq = queryOne(SELECTORS.seq);
         if (seq) doSequence(seq);
-        else state.lastSeqKey = "";
+        else {
+            state.lastSeqKey = "";
+            state.lastSeqSentAt = 0;
+        }
 
         if (state.mode === "priest") priestTick();
 
@@ -936,7 +946,7 @@ Automation script for The Last Meadow mini-games inside Discord.
     tryClickGoBackModal();
     tryContinue();
 
-    console.log("%c[The Last Meadow Auto Script] v2.0", "color:#00ff00;font-weight:bold;font-size:14px");
+    console.log("%c[The Last Meadow Auto Script] v2.0 (safe refactor)", "color:#00ff00;font-weight:bold;font-size:14px");
     console.log("%cStop command: stopBot()", "color:#ff9900");
 })();
 ```
