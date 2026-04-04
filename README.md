@@ -175,10 +175,19 @@ Automation script for The Last Meadow mini-games inside Discord.
         return trimmed;
     }
 
+    function resolveEventCtor(target, ctorName) {
+        const targetWin =
+            target?.ownerDocument?.defaultView ||
+            target?.defaultView ||
+            (target?.window === target ? target : window);
+
+        return targetWin?.[ctorName] || window?.[ctorName] || globalThis?.[ctorName] || null;
+    }
+
     function dispatchSafe(target, ctorName, type, options) {
         if (!target || typeof target.dispatchEvent !== "function") return;
 
-        const EventCtor = globalThis?.[ctorName];
+        const EventCtor = resolveEventCtor(target, ctorName);
         if (typeof EventCtor !== "function") return;
 
         try {
@@ -203,7 +212,18 @@ Automation script for The Last Meadow mini-games inside Discord.
         const definition = KEY_MAP[key];
         if (!definition) return;
 
-        const options = { bubbles: true, cancelable: true, ...definition };
+        const options = {
+            bubbles: true,
+            cancelable: true,
+            location: 0,
+            repeat: false,
+            altKey: false,
+            ctrlKey: false,
+            shiftKey: false,
+            metaKey: false,
+            isComposing: false,
+            ...definition
+        };
         dispatchSafe(target, "KeyboardEvent", "keydown", options);
         dispatchSafe(target, "KeyboardEvent", "keypress", options);
         dispatchSafe(target, "KeyboardEvent", "keyup", options);
@@ -436,11 +456,34 @@ Automation script for The Last Meadow mini-games inside Discord.
 
         try {
             for (const key of keys) {
-                sendKey(document, key);
-                sendKey(document.body, key);
+                let sent = 0;
+                try {
+                    sendKey(document, key);
+                    sent++;
+                } catch (e) {
+                    console.warn("%c[Craft] Failed to send to document:", "color:#ffaa00", e.message);
+                }
+
+                try {
+                    sendKey(document.body, key);
+                    sent++;
+                } catch (e) {
+                    console.warn("%c[Craft] Failed to send to body:", "color:#ffaa00", e.message);
+                }
 
                 const active = document.activeElement;
-                if (active && active !== document.body) sendKey(active, key);
+                if (active && active !== document.body && document.contains(active)) {
+                    try {
+                        sendKey(active, key);
+                        sent++;
+                    } catch (e) {
+                        console.warn("%c[Craft] Failed to send to activeElement:", "color:#ffaa00", e.message);
+                    }
+                }
+
+                if (sent === 0) {
+                    console.warn("%c[Craft] WARNING: No targets received key '%s'", "color:#ff6600", key);
+                }
 
                 await delay(CONFIG.keyDelayMs);
             }
@@ -556,9 +599,26 @@ Automation script for The Last Meadow mini-games inside Discord.
             second.logicalCenter !== null &&
             Math.abs(first.logicalCenter - second.logicalCenter) <= shieldW * CONFIG.palDualCoverRatio
         ) {
+            // Dual-threat mode: check if 3+ close projectiles should be included
+            let avgLogical = first.logicalCenter + second.logicalCenter;
+            let avgClient = first.clientCenter + second.clientCenter;
+            let count = 2;
+
+            // Include nearby threats beyond the second one
+            for (let i = 2; i < threats.length; i++) {
+                const threat = threats[i];
+                if (first.topMetric - threat.topMetric > CONFIG.palTopDelta) break; // Too far down
+                if (threat.logicalCenter === null) continue;
+                if (Math.abs(first.logicalCenter - threat.logicalCenter) > shieldW * CONFIG.palDualCoverRatio) continue;
+                
+                avgLogical += threat.logicalCenter;
+                avgClient += threat.clientCenter;
+                count++;
+            }
+
             return {
-                logicalCenter: (first.logicalCenter + second.logicalCenter) / 2,
-                clientCenter: (first.clientCenter + second.clientCenter) / 2
+                logicalCenter: avgLogical / count,
+                clientCenter: avgClient / count
             };
         }
 
@@ -681,6 +741,11 @@ Automation script for The Last Meadow mini-games inside Discord.
 
             ctx.shield.style.setProperty("left", `${nextLeft}px`, "important");
             ctx.shield.style.setProperty("transform", "none", "important");
+        }
+
+        // Guard against null clientCenter
+        if (target.clientCenter === null || target.clientCenter === undefined) {
+            return;
         }
 
         const x = target.clientCenter;
@@ -946,7 +1011,7 @@ Automation script for The Last Meadow mini-games inside Discord.
     tryClickGoBackModal();
     tryContinue();
 
-    console.log("%c[The Last Meadow Auto Script] v2.0 (safe refactor)", "color:#00ff00;font-weight:bold;font-size:14px");
+    console.log("%c[The Last Meadow Auto Script] v2.0 (final)", "color:#00ff00;font-weight:bold;font-size:14px");
     console.log("%cStop command: stopBot()", "color:#ff9900");
 })();
 ```
