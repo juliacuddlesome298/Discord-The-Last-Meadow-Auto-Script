@@ -1066,19 +1066,6 @@ Run this in Console:
 stopBot();
 ```
 
-## Configuration
-
-You can tune behavior in the `CFG` object:
-
-- `pollMs` for the main polling interval
-- `keyDelayMs` for Craft key delay
-- `palTopDelta` for Paladin second-projectile priority threshold
-- `palDualCoverRatio` for Paladin dual-projectile center behavior
-- `priestClickDelayMs` for Priest tile click cadence
-- `priestTripletDelayMs` for Priest post-triplet spacing
-- `goBackScanMs` for Go Back modal scan interval
-- `goBackCooldownMs` for Go Back click debounce
-
 ## Notes
 
 - The script relies on current Discord CSS class names.
