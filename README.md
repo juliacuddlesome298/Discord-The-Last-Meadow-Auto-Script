@@ -27,7 +27,8 @@ Automation script for The Last Meadow mini-games inside Discord.
 5. Press Enter.
 <details>
   <summary>Script</summary>
-```javascript
+  
+  ```javascript
   (function () {
     "use strict";
 
