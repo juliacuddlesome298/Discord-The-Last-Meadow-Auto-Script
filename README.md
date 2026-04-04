@@ -30,63 +30,88 @@ Automation script for The Last Meadow mini-games inside Discord.
   
   ```javascript
 (function () {
-    // Stop previous instance if present
+    "use strict";
+
+    // Stop previous instance if it exists
     try {
         if (typeof window.stopBot === "function") window.stopBot();
     } catch {}
 
-    const RANGER_HASH = "16fb25536f00a7996cbdf5bfff2ef0d09459f580af9e67d380263f5ead43055e";
-    const GO_BACK_BTN_SEL = ".button__65fca.buttonWhite__65fca.clickable__5c90e";
+    const MODE = Object.freeze({
+        IDLE: null,
+        RANGER: "ranger",
+        PALADIN: "paladin",
+        PRIEST: "priest"
+    });
 
-    const SEL = {
-        target: ".targetContainer_b6b008",
+    const HASH = {
+        RANGER: "16fb25536f00a7996cbdf5bfff2ef0d09459f580af9e67d380263f5ead43055e"
+    };
+
+    const SELECTOR = {
+        // Shared
         clickable: ".clickable__5c90e",
-        seq: ".sequences__34527",
-        char: ".character__34527 img[alt]",
-        cont: ".continueButtonWrapper__24749 .clickable__5c90e",
-        activity: ".activityButton__8af73",
-        cooldown: ".countdown__8af73",
+        activityButton: ".activityButton__8af73",
+        activityCooldown: ".countdown__8af73",
+        continueButton: ".continueButtonWrapper__24749 .clickable__5c90e",
+        modalResourceText: ".text_a2a25a, .text-lg\\/normal_cf4812, [data-text-variant='text-lg/normal']",
+        goBackButton: ".button__65fca.buttonWhite__65fca.clickable__5c90e",
+
+        // Ranger
+        rangerTarget: ".targetContainer_b6b008",
+
+        // Craft
+        craftSequences: ".sequences__34527",
+        craftCharacter: ".character__34527 img[alt]",
 
         // Paladin
-        projectile: ".projectile_cce732",
-        shield: ".shield_cce732",
-        palRoot: ".container__24749, .game__24749, .shaker_cce732",
+        paladinRoot: ".container__24749, .game__24749, .shaker_cce732",
+        paladinShield: ".shield_cce732",
+        paladinProjectile: ".projectile_cce732",
 
         // Priest
         priestGame: ".game__5c62c",
         priestGrid: ".grid__0dcd3",
         priestItem: ".gridItem__0dcd3",
         priestMatched: ".matched__0dcd3",
-        priestGlyph: ".gridAssetGlyph__0dcd3",
-
-        // Modal
-        modalResourceText: ".text_a2a25a, .text-lg\\/normal_cf4812, [data-text-variant='text-lg/normal']"
+        priestGlyph: ".gridAssetGlyph__0dcd3"
     };
 
-    const CFG = {
-        dragonMs: 50,
-        activityMs: 50,
-        pollMs: 25,
-        settleMs: 20,
-        keyDelayMs: 70,
+    const CONFIG = {
+        // Base loops
+        dragonClickIntervalMs: 50,
+        activityClickIntervalMs: 50,
+        pollIntervalMs: 25,
+        modalScanIntervalMs: 60,
 
-        // Paladin
-        palSmooth: 1,
-        palAimY: 0.93,
-        palTopDelta: 120,
-        palDualCoverRatio: 1.08,
-        palDefaultShieldW: 138,
-        palDefaultProjW: 115,
-        palMinShieldW: 96,
-        blockRealMouse: true,
+        // Craft
+        craftSettleMs: 20,
+        craftKeyDelayMs: 70,
+        craftRetryCooldownMs: 180,
+
+        // Paladin base
+        paladinSmoothing: 0.42,
+        paladinAimYRatio: 0.93,
+        paladinSecondThreatDeltaY: 95,
+        paladinDualCoverRatio: 0.9,
+        paladinDefaultShieldWidth: 138,
+        paladinDefaultProjectileWidth: 115,
+        paladinMinShieldWidth: 96,
+        paladinMouseLock: true,
+
+        // Paladin anti-jitter
+        paladinMinSwitchIntervalMs: 70,
+        paladinSwitchPriorityDelta: 34,
+        paladinDeadZonePx: 2.5,
+        paladinPointerSmoothing: 0.6,
+        paladinPointerDeadZonePx: 1.5,
 
         // Priest
         priestClickDelayMs: 28,
         priestTripletDelayMs: 120,
 
-        // Go Back modal
-        goBackScanMs: 60,
-        goBackCooldownMs: 250
+        // Modal
+        modalClickCooldownMs: 250
     };
 
     const KEY_MAP = {
@@ -101,126 +126,118 @@ Automation script for The Last Meadow mini-games inside Discord.
     const OUT_OF_RESOURCES_RE = /out of resources/i;
     const PRIEST_MATCHED_CLASS = "matched__0dcd3";
 
-    const state = {
-        mode: null,
-
-        // Paladin
-        palRaf: 0,
-        palDrag: false,
-        palRoot: null,
-        mouseLockHandler: null,
-        projectileMeta: new WeakMap(),
-        liveProjectileSprites: new Set(),
-
-        // Priest
-        priestRaf: 0,
-        priestBusy: false,
-
-        // Shared
-        craftBusy: false,
-        lastSeqKey: "",
-        clickedContinue: new WeakSet(),
-        lastGoBackClickAt: 0
+    const runtime = {
+        mode: MODE.IDLE,
+        observer: null,
+        intervalIds: new Set()
     };
 
-    const q = (s, r = document) => r.querySelector(s);
-    const qa = (s, r = document) => Array.from(r.querySelectorAll(s));
-    const num = (v) => {
-        const n = parseFloat(v);
+    const q = (selector, root = document) => root.querySelector(selector);
+    const qa = (selector, root = document) => Array.from(root.querySelectorAll(selector));
+
+    const toNumber = (value) => {
+        const n = parseFloat(value);
         return Number.isFinite(n) ? n : null;
     };
+
     const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-    function isVisible(el) {
-        if (!(el instanceof Element)) return false;
-        if (!document.contains(el)) return false;
+    const log = (message, color = "#88ccff") => {
+        console.log(`%c${message}`, `color:${color};font-weight:bold`);
+    };
 
-        const r = el.getBoundingClientRect();
-        if (r.width < 2 || r.height < 2) return false;
+    function isVisible(element) {
+        if (!(element instanceof Element)) return false;
+        if (!document.contains(element)) return false;
 
-        const cs = getComputedStyle(el);
-        if (cs.display === "none" || cs.visibility === "hidden") return false;
+        const rect = element.getBoundingClientRect();
+        if (rect.width < 2 || rect.height < 2) return false;
 
-        const op = parseFloat(cs.opacity || "1");
-        if (Number.isFinite(op) && op < 0.02) return false;
+        const style = getComputedStyle(element);
+        if (style.display === "none" || style.visibility === "hidden") return false;
+
+        const opacity = parseFloat(style.opacity || "1");
+        if (Number.isFinite(opacity) && opacity < 0.02) return false;
 
         return true;
     }
 
-    function normalizeKeyName(name) {
-        if (!name) return null;
-        const k = String(name).trim();
-        if (k === "Space" || k === "Spacebar") return " ";
-        return k;
+    function normalizeKeyName(keyName) {
+        if (!keyName) return null;
+        const normalized = String(keyName).trim();
+        if (normalized === "Space" || normalized === "Spacebar") return " ";
+        return normalized;
     }
 
     function sendKey(target, keyName) {
         if (!target) return;
-        const key = normalizeKeyName(keyName);
-        const def = KEY_MAP[key];
-        if (!def) return;
 
-        const opts = { bubbles: true, cancelable: true, ...def };
+        const normalized = normalizeKeyName(keyName);
+        const definition = KEY_MAP[normalized];
+        if (!definition) return;
+
+        const options = { bubbles: true, cancelable: true, ...definition };
         try {
-            target.dispatchEvent(new KeyboardEvent("keydown", opts));
-            target.dispatchEvent(new KeyboardEvent("keypress", opts));
-            target.dispatchEvent(new KeyboardEvent("keyup", opts));
+            target.dispatchEvent(new KeyboardEvent("keydown", options));
+            target.dispatchEvent(new KeyboardEvent("keypress", options));
+            target.dispatchEvent(new KeyboardEvent("keyup", options));
         } catch {}
     }
 
-    function emitPointer(target, type, opts) {
+    function emitPointer(target, type, options) {
         if (!target || typeof target.dispatchEvent !== "function") return;
         if (typeof PointerEvent !== "function") return;
         try {
-            target.dispatchEvent(new PointerEvent(type, opts));
+            target.dispatchEvent(new PointerEvent(type, options));
         } catch {}
     }
 
-    function emitMouse(target, type, opts) {
+    function emitMouse(target, type, options) {
         if (!target || typeof target.dispatchEvent !== "function") return;
         try {
-            target.dispatchEvent(new MouseEvent(type, opts));
+            target.dispatchEvent(new MouseEvent(type, options));
         } catch {}
     }
 
-    function hardClick(el) {
-        if (!el) return false;
+    function hardClick(element) {
+        if (!element) return false;
 
         try {
-            if (typeof el.focus === "function") el.focus({ preventScroll: true });
+            if (typeof element.focus === "function") element.focus({ preventScroll: true });
         } catch {}
 
-        const r = el.getBoundingClientRect();
-        if (r.width < 2 || r.height < 2) return false;
+        const rect = element.getBoundingClientRect();
+        if (rect.width < 2 || rect.height < 2) return false;
 
-        const clientX = r.left + r.width / 2;
-        const clientY = r.top + r.height / 2;
+        const clientX = rect.left + rect.width / 2;
+        const clientY = rect.top + rect.height / 2;
 
-        const under = document.elementFromPoint(clientX, clientY);
-        const targets = [el, under].filter(Boolean);
+        const underCursor = document.elementFromPoint(clientX, clientY);
+        const targets = [element, underCursor].filter(Boolean);
 
         const base = { bubbles: true, cancelable: true, composed: true, view: window, clientX, clientY };
-        const mDown = { ...base, button: 0, buttons: 1 };
-        const mUp = { ...base, button: 0, buttons: 0 };
-        const pDown = { ...mDown, pointerId: 1, pointerType: "mouse", isPrimary: true };
-        const pUp = { ...mUp, pointerId: 1, pointerType: "mouse", isPrimary: true };
+        const mouseDown = { ...base, button: 0, buttons: 1 };
+        const mouseUp = { ...base, button: 0, buttons: 0 };
+        const pointerDown = { ...mouseDown, pointerId: 1, pointerType: "mouse", isPrimary: true };
+        const pointerUp = { ...mouseUp, pointerId: 1, pointerType: "mouse", isPrimary: true };
 
-        for (const t of targets) {
-            emitPointer(t, "pointerdown", pDown);
-            emitMouse(t, "mousedown", mDown);
+        for (const target of targets) {
+            emitPointer(target, "pointerdown", pointerDown);
+            emitMouse(target, "mousedown", mouseDown);
         }
-        for (const t of targets) {
-            emitPointer(t, "pointerup", pUp);
-            emitMouse(t, "mouseup", mUp);
-            emitMouse(t, "click", mUp);
+
+        for (const target of targets) {
+            emitPointer(target, "pointerup", pointerUp);
+            emitMouse(target, "mouseup", mouseUp);
+            emitMouse(target, "click", mouseUp);
         }
 
         try {
-            el.click();
+            element.click();
         } catch {}
 
         try {
-            el.dispatchEvent(new KeyboardEvent("keydown", {
+            element.dispatchEvent(new KeyboardEvent("keydown", {
                 key: "Enter",
                 code: "Enter",
                 keyCode: 13,
@@ -228,7 +245,7 @@ Automation script for The Last Meadow mini-games inside Discord.
                 bubbles: true,
                 cancelable: true
             }));
-            el.dispatchEvent(new KeyboardEvent("keyup", {
+            element.dispatchEvent(new KeyboardEvent("keyup", {
                 key: "Enter",
                 code: "Enter",
                 keyCode: 13,
@@ -241,628 +258,801 @@ Automation script for The Last Meadow mini-games inside Discord.
         return true;
     }
 
-    function tryClickGoBackModal() {
-        const now = Date.now();
-        if (now - state.lastGoBackClickAt < CFG.goBackCooldownMs) return false;
-
-        const warningNode = qa(SEL.modalResourceText).find((el) => {
-            if (!isVisible(el)) return false;
-            const text = (el.textContent || "").trim();
-            return OUT_OF_RESOURCES_RE.test(text);
-        });
-        if (!warningNode) return false;
-
-        const modalRoot =
-            warningNode.closest("[role='dialog']") ||
-            warningNode.closest("[class*='modal']") ||
-            warningNode.closest("[class*='layer']") ||
-            warningNode.parentElement ||
-            document;
-
-        let btn = q(GO_BACK_BTN_SEL, modalRoot);
-        if (btn && !isVisible(btn)) btn = null;
-
-        if (!btn) {
-            btn = qa(GO_BACK_BTN_SEL).find((b) => isVisible(b)) || null;
-        }
-        if (!btn) return false;
-
-        state.lastGoBackClickAt = now;
-        hardClick(btn);
-        setTimeout(() => hardClick(btn), 60);
-
-        console.log("%c[Modal] Go Back clicked", "color:#ffcc66;font-weight:bold");
-        return true;
+    function addInterval(callback, intervalMs) {
+        const id = setInterval(callback, intervalMs);
+        runtime.intervalIds.add(id);
+        return id;
     }
 
-    // ---------- Battle detection ----------
-    function getPaladinContext() {
-        let best = null;
+    function clearAllIntervals() {
+        for (const id of runtime.intervalIds) clearInterval(id);
+        runtime.intervalIds.clear();
+    }
 
-        for (const root of qa(SEL.palRoot)) {
-            if (!isVisible(root)) continue;
+    const modalManager = (() => {
+        let lastClickAt = 0;
 
-            const shield = q(SEL.shield, root);
-            if (!shield || !isVisible(shield)) continue;
+        function tick() {
+            const now = Date.now();
+            if (now - lastClickAt < CONFIG.modalClickCooldownMs) return false;
 
-            const rect = root.getBoundingClientRect();
-            if (rect.width < 80 || rect.height < 80) continue;
+            const warningNode = qa(SELECTOR.modalResourceText).find((element) => {
+                if (!isVisible(element)) return false;
+                return OUT_OF_RESOURCES_RE.test((element.textContent || "").trim());
+            });
 
-            const projectiles = qa(SEL.projectile, root).filter(isVisible);
-            const score = projectiles.length * 1000000 + rect.width * rect.height;
+            if (!warningNode) return false;
 
-            if (!best || score > best.score) {
-                best = { root, shield, rect, projectiles, score };
+            const modalRoot =
+                warningNode.closest("[role='dialog']") ||
+                warningNode.closest("[class*='modal']") ||
+                warningNode.closest("[class*='layer']") ||
+                warningNode.parentElement ||
+                document;
+
+            let button = q(SELECTOR.goBackButton, modalRoot);
+            if (button && !isVisible(button)) button = null;
+
+            if (!button) {
+                button = qa(SELECTOR.goBackButton).find((b) => isVisible(b)) || null;
+            }
+
+            if (!button) return false;
+
+            lastClickAt = now;
+            hardClick(button);
+            setTimeout(() => hardClick(button), 60);
+
+            log("[Modal] Go Back clicked", "#ffcc66");
+            return true;
+        }
+
+        return { tick };
+    })();
+
+    const continueManager = (() => {
+        const clickedButtons = new WeakSet();
+
+        function tick() {
+            const button = q(SELECTOR.continueButton);
+            if (!button || clickedButtons.has(button)) return;
+
+            clickedButtons.add(button);
+            button.click();
+            log("[Continue] Clicked", "#aaffff");
+        }
+
+        return { tick };
+    })();
+
+    const rangerManager = (() => {
+        const processedTargets = new WeakSet();
+
+        function fireTarget(targetRoot) {
+            if (!document.contains(targetRoot)) return;
+
+            const clickable = q(SELECTOR.clickable, targetRoot) || targetRoot;
+            clickable.focus({ preventScroll: true });
+            clickable.click();
+
+            sendKey(clickable, " ");
+            sendKey(document.body, " ");
+        }
+
+        function queueTarget(targetElement) {
+            if (processedTargets.has(targetElement)) return;
+
+            try {
+                if (!targetElement.matches(SELECTOR.rangerTarget)) return;
+            } catch {
+                return;
+            }
+
+            processedTargets.add(targetElement);
+            setTimeout(() => fireTarget(targetElement), CONFIG.craftSettleMs);
+        }
+
+        function tick() {
+            qa(SELECTOR.rangerTarget).forEach(queueTarget);
+        }
+
+        function onNodeAdded(node) {
+            if (!(node instanceof Element)) return;
+            if (node.matches?.(SELECTOR.rangerTarget)) queueTarget(node);
+            node.querySelectorAll?.(SELECTOR.rangerTarget).forEach(queueTarget);
+        }
+
+        return { tick, onNodeAdded };
+    })();
+
+    const craftManager = (() => {
+        let busy = false;
+        let lastAttemptAt = 0;
+
+        async function runSequence(sequenceElement) {
+            const keys = qa(SELECTOR.craftCharacter, sequenceElement)
+                .map((img) => normalizeKeyName(img.getAttribute("alt")))
+                .filter((key) => KEY_MAP[key]);
+
+            if (!keys.length || busy) return;
+
+            const now = Date.now();
+            if (now - lastAttemptAt < CONFIG.craftRetryCooldownMs) return;
+
+            busy = true;
+            lastAttemptAt = now;
+
+            log(`[Craft] Sequence: ${keys.join(" -> ")}`, "#ffff00");
+
+            try {
+                for (const key of keys) {
+                    sendKey(document, key);
+                    sendKey(document.body, key);
+                    sendKey(window, key);
+
+                    const active = document.activeElement;
+                    if (active && active !== document.body) sendKey(active, key);
+
+                    await sleep(CONFIG.craftKeyDelayMs);
+                }
+            } finally {
+                busy = false;
             }
         }
 
-        return best;
-    }
-
-    function hasPriestBoard() {
-        const grid = q(SEL.priestGrid) || q(SEL.priestGame);
-        if (!grid) return false;
-        const items = qa(SEL.priestItem).filter(isVisible);
-        return items.length >= 3;
-    }
-
-    function getBattleType() {
-        if (getPaladinContext()) return "paladin";
-        if (hasPriestBoard()) return "priest";
-        if (qa(SEL.target).some(isVisible)) return "ranger";
-
-        // Ranger fallback by class asset before battle starts
-        for (const w of qa(SEL.activity)) {
-            const img = w.querySelector("img.activityButtonAsset__8af73, img.asset__65fca");
-            if (img && img.src && img.src.includes(RANGER_HASH)) return "ranger";
+        function tick(sequenceOverride) {
+            const sequenceElement = sequenceOverride || q(SELECTOR.craftSequences);
+            if (!sequenceElement) return;
+            runSequence(sequenceElement);
         }
 
-        return null;
-    }
+        function onNodeAdded(node) {
+            if (!(node instanceof Element)) return;
 
-    // ---------- Grass Toucher ----------
-    const dragonBot = setInterval(() => {
-        const el = q(".dragonClickable__8e80e") || q('img[alt="Grass Toucher"]');
-        if (el) el.click();
-    }, CFG.dragonMs);
+            const sequenceElement = node.matches?.(SELECTOR.craftSequences)
+                ? node
+                : node.querySelector?.(SELECTOR.craftSequences);
 
-    // ---------- Activity ----------
-    const activityBot = setInterval(() => {
-        for (const wrapper of qa(SEL.activity)) {
-            if (q(SEL.cooldown, wrapper)) continue;
-            q(SEL.clickable, wrapper)?.click();
-        }
-    }, CFG.activityMs);
-
-    // ---------- Modal watcher ----------
-    const goBackBot = setInterval(() => {
-        tryClickGoBackModal();
-    }, CFG.goBackScanMs);
-
-    // ---------- Continue ----------
-    function tryContinue() {
-        const btn = q(SEL.cont);
-        if (!btn || state.clickedContinue.has(btn)) return;
-        state.clickedContinue.add(btn);
-        btn.click();
-        console.log("%c[Continue] Clicked", "color:#aaffff;font-weight:bold");
-    }
-
-    // ---------- Ranger ----------
-    const hitTargets = new WeakSet();
-
-    function fireTarget(el) {
-        if (!document.contains(el)) return;
-        const btn = q(SEL.clickable, el) || el;
-        btn.focus({ preventScroll: true });
-        btn.click();
-        sendKey(btn, " ");
-        sendKey(document.body, " ");
-    }
-
-    function tryTarget(el) {
-        if (hitTargets.has(el)) return;
-        try {
-            if (!el.matches(SEL.target)) return;
-        } catch {
-            return;
-        }
-        hitTargets.add(el);
-        setTimeout(() => fireTarget(el), CFG.settleMs);
-    }
-
-    // ---------- Craft ----------
-    async function doSequence(seqEl) {
-        const keys = qa(SEL.char, seqEl)
-            .map((img) => normalizeKeyName(img.getAttribute("alt")))
-            .filter((k) => KEY_MAP[k]);
-
-        if (!keys.length) return;
-
-        const seqKey = keys.join(",");
-        if (state.craftBusy || seqKey === state.lastSeqKey) return;
-
-        state.craftBusy = true;
-        state.lastSeqKey = seqKey;
-
-        console.log("%c[Craft] Sequence:", "color:#ffff00;font-weight:bold", keys.join(" -> "));
-
-        for (const key of keys) {
-            sendKey(document, key);
-            sendKey(document.body, key);
-            const active = document.activeElement;
-            if (active && active !== document.body) sendKey(active, key);
-            await sleep(CFG.keyDelayMs);
+            if (sequenceElement) tick(sequenceElement);
         }
 
-        state.craftBusy = false;
-    }
+        return { tick, onNodeAdded };
+    })();
 
-    // ---------- Paladin ----------
-    function resetPaladinProjectileCache() {
-        state.projectileMeta = new WeakMap();
-        state.liveProjectileSprites = new Set();
-    }
+    const paladinManager = (() => {
+        let rafId = 0;
+        let dragActive = false;
+        let arenaRoot = null;
+        let mouseLockHandler = null;
 
-    function isResolvedProjectile(el, topMetric, src, now) {
-        let meta = state.projectileMeta.get(el);
+        let projectileMeta = new WeakMap();
+        let liveProjectileSprites = new Set();
 
-        if (!meta) {
-            meta = {
-                top: topMetric,
-                ts: now,
-                stableFrames: 0,
-                moved: false,
-                src: src || ""
-            };
-            state.projectileMeta.set(el, meta);
-            return false;
+        let trackedProjectile = null;
+        let lastSwitchAt = 0;
+        let lastClientX = null;
+
+        function resetProjectileCache() {
+            projectileMeta = new WeakMap();
+            liveProjectileSprites = new Set();
+
+            trackedProjectile = null;
+            lastSwitchAt = 0;
+            lastClientX = null;
         }
 
-        const dy = Math.abs(topMetric - meta.top);
-        const dt = now - meta.ts;
+        function getContext() {
+            let best = null;
 
-        if (dy > 0.7) {
-            meta.moved = true;
-            meta.stableFrames = 0;
+            for (const root of qa(SELECTOR.paladinRoot)) {
+                if (!isVisible(root)) continue;
 
-            // Learn "alive" sprite while projectile is moving
-            if (src) state.liveProjectileSprites.add(src);
-        } else if (dt >= 20) {
-            meta.stableFrames += 1;
+                const shield = q(SELECTOR.paladinShield, root);
+                if (!shield || !isVisible(shield)) continue;
+
+                const rect = root.getBoundingClientRect();
+                if (rect.width < 80 || rect.height < 80) continue;
+
+                const projectiles = qa(SELECTOR.paladinProjectile, root).filter(isVisible);
+                const score = projectiles.length * 1000000 + rect.width * rect.height;
+
+                if (!best || score > best.score) {
+                    best = { root, shield, rect, projectiles };
+                }
+            }
+
+            return best;
         }
 
-        const srcChanged = !!(meta.src && src && meta.src !== meta.src);
-        const looksLikeImpactSprite =
-            meta.moved &&
-            !!src &&
-            state.liveProjectileSprites.size > 0 &&
-            !state.liveProjectileSprites.has(src);
-        const frozenAfterMove = meta.moved && meta.stableFrames >= 2;
+        function isResolvedProjectile(projectile, topMetric, src, now) {
+            let previous = projectileMeta.get(projectile);
 
-        const resolved = looksLikeImpactSprite || srcChanged || frozenAfterMove;
+            if (!previous) {
+                previous = {
+                    top: topMetric,
+                    ts: now,
+                    stableFrames: 0,
+                    moved: false,
+                    src: src || ""
+                };
+                projectileMeta.set(projectile, previous);
+                return false;
+            }
 
-        meta.top = topMetric;
-        meta.ts = now;
-        meta.src = src || meta.src;
+            const dy = Math.abs(topMetric - previous.top);
+            const dt = now - previous.ts;
 
-        return resolved;
-    }
+            if (dy > 0.7) {
+                previous.moved = true;
+                previous.stableFrames = 0;
+                if (src) liveProjectileSprites.add(src);
+            } else if (dt >= 20) {
+                previous.stableFrames += 1;
+            }
 
-    function getShieldWidthLogical(shield) {
-        return Math.max(
-            CFG.palMinShieldW,
-            num(shield.style.width) ??
-                num(getComputedStyle(shield).width) ??
-                CFG.palDefaultShieldW
-        );
-    }
+            const srcChanged = Boolean(previous.src && src && previous.src !== src);
 
-    function getProjectileThreats(root) {
-        const list = [];
-        const now = performance.now();
+            const switchedToUnknownSprite =
+                previous.moved &&
+                Boolean(src) &&
+                liveProjectileSprites.size > 0 &&
+                !liveProjectileSprites.has(src);
 
-        for (const el of qa(SEL.projectile, root)) {
-            if (!isVisible(el)) continue;
+            const frozenAfterMovement = previous.moved && previous.stableFrames >= 2;
 
-            const rect = el.getBoundingClientRect();
-            const topMetric = num(el.style.top) ?? rect.bottom;
-            const src = el.getAttribute("src") || "";
+            const resolved =
+                switchedToUnknownSprite ||
+                (srcChanged && previous.moved) ||
+                frozenAfterMovement;
 
-            // Skip projectiles already in impact animation
-            if (isResolvedProjectile(el, topMetric, src, now)) continue;
+            previous.top = topMetric;
+            previous.ts = now;
+            previous.src = src || previous.src;
 
-            const leftLogical = num(el.style.left);
-            const widthLogical = num(el.style.width) ?? CFG.palDefaultProjW;
-            const logicalCenter = leftLogical === null ? null : leftLogical + widthLogical / 2;
-            const clientCenter = rect.left + rect.width / 2;
-
-            list.push({
-                el,
-                topMetric,
-                logicalCenter,
-                clientCenter
-            });
+            return resolved;
         }
 
-        list.sort((a, b) => b.topMetric - a.topMetric);
-        return list;
-    }
+        function getThreats(root) {
+            const threats = [];
+            const now = performance.now();
 
-    function choosePaladinTarget(threats, shieldW) {
-        if (!threats.length) return null;
-        const a = threats[0];
-        const b = threats[1];
+            for (const projectile of qa(SELECTOR.paladinProjectile, root)) {
+                if (!isVisible(projectile)) continue;
 
-        if (!b) {
+                const rect = projectile.getBoundingClientRect();
+                const topMetric = toNumber(projectile.style.top) ?? rect.bottom;
+                const src = projectile.getAttribute("src") || "";
+
+                // Skip projectile already in post-collision animation
+                if (isResolvedProjectile(projectile, topMetric, src, now)) continue;
+
+                const leftLogical = toNumber(projectile.style.left);
+                const widthLogical = toNumber(projectile.style.width) ?? CONFIG.paladinDefaultProjectileWidth;
+                const logicalCenter = leftLogical == null ? null : leftLogical + widthLogical / 2;
+                const clientCenter = rect.left + rect.width / 2;
+
+                threats.push({
+                    element: projectile,
+                    topMetric,
+                    logicalCenter,
+                    clientCenter
+                });
+            }
+
+            threats.sort((a, b) => b.topMetric - a.topMetric);
+            return threats;
+        }
+
+        function getShieldWidth(shield) {
+            return Math.max(
+                CONFIG.paladinMinShieldWidth,
+                toNumber(shield.style.width) ??
+                    toNumber(getComputedStyle(shield).width) ??
+                    CONFIG.paladinDefaultShieldWidth
+            );
+        }
+
+        function chooseTarget(threats, shieldWidth) {
+            if (!threats.length) return null;
+
+            const now = performance.now();
+            const leader = threats[0];
+            let selected = leader;
+
+            if (trackedProjectile) {
+                const tracked = threats.find((t) => t.element === trackedProjectile);
+
+                if (tracked) {
+                    const canSwitchByTime =
+                        (now - lastSwitchAt) >= CONFIG.paladinMinSwitchIntervalMs;
+
+                    const leaderMuchCloser =
+                        leader.element !== tracked.element &&
+                        (leader.topMetric - tracked.topMetric) >= CONFIG.paladinSwitchPriorityDelta;
+
+                    selected = (canSwitchByTime && leaderMuchCloser) ? leader : tracked;
+                }
+            }
+
+            if (selected.element !== trackedProjectile) {
+                trackedProjectile = selected.element;
+                lastSwitchAt = now;
+            }
+
+            const second = threats.find((t) => t.element !== selected.element);
+
+            if (
+                second &&
+                selected.logicalCenter != null &&
+                second.logicalCenter != null &&
+                (selected.topMetric - second.topMetric) <= CONFIG.paladinSecondThreatDeltaY &&
+                Math.abs(selected.logicalCenter - second.logicalCenter) <= shieldWidth * CONFIG.paladinDualCoverRatio
+            ) {
+                return {
+                    logicalCenter: (selected.logicalCenter + second.logicalCenter) / 2,
+                    clientCenter: (selected.clientCenter + second.clientCenter) / 2
+                };
+            }
+
             return {
-                logicalCenter: a.logicalCenter,
-                clientCenter: a.clientCenter
+                logicalCenter: selected.logicalCenter,
+                clientCenter: selected.clientCenter
             };
         }
 
-        const closeInY = (a.topMetric - b.topMetric) <= CFG.palTopDelta;
+        function getInputTargets(context) {
+            return [context.shield, context.root, document, document.body, window];
+        }
 
-        if (
-            closeInY &&
-            a.logicalCenter !== null &&
-            b.logicalCenter !== null &&
-            Math.abs(a.logicalCenter - b.logicalCenter) <= shieldW * CFG.palDualCoverRatio
-        ) {
-            return {
-                logicalCenter: (a.logicalCenter + b.logicalCenter) / 2,
-                clientCenter: (a.clientCenter + b.clientCenter) / 2
+        function pointerDown(context, x, y) {
+            const base = { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y };
+            const mouse = { ...base, button: 0, buttons: 1 };
+            const pointer = { ...mouse, pointerId: 1, pointerType: "mouse", isPrimary: true };
+
+            for (const target of getInputTargets(context)) {
+                emitPointer(target, "pointerdown", pointer);
+                emitMouse(target, "mousedown", mouse);
+            }
+
+            dragActive = true;
+        }
+
+        function pointerMove(context, x, y) {
+            const base = { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y, buttons: 1 };
+            const pointer = { ...base, pointerId: 1, pointerType: "mouse", isPrimary: true };
+
+            for (const target of getInputTargets(context)) {
+                emitPointer(target, "pointermove", pointer);
+                emitMouse(target, "mousemove", base);
+            }
+        }
+
+        function pointerUp() {
+            if (!dragActive) return;
+
+            const rect = arenaRoot?.getBoundingClientRect();
+            const x = rect ? rect.left + rect.width / 2 : 0;
+            const y = rect ? rect.top + rect.height * CONFIG.paladinAimYRatio : 0;
+
+            const base = { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y };
+            const mouse = { ...base, button: 0, buttons: 0 };
+            const pointer = { ...mouse, pointerId: 1, pointerType: "mouse", isPrimary: true };
+
+            for (const target of [arenaRoot, document, document.body, window]) {
+                emitPointer(target, "pointerup", pointer);
+                emitMouse(target, "mouseup", mouse);
+            }
+
+            dragActive = false;
+        }
+
+        function eventInsideArena(event) {
+            if (!arenaRoot) return true;
+            if (!("clientX" in event) || !("clientY" in event)) return true;
+
+            const rect = arenaRoot.getBoundingClientRect();
+            return (
+                event.clientX >= rect.left &&
+                event.clientX <= rect.right &&
+                event.clientY >= rect.top &&
+                event.clientY <= rect.bottom
+            );
+        }
+
+        function enableMouseLock() {
+            if (!CONFIG.paladinMouseLock || mouseLockHandler) return;
+
+            mouseLockHandler = (event) => {
+                if (runtime.mode !== MODE.PALADIN) return;
+                if (!event.isTrusted) return;
+                if (!eventInsideArena(event)) return;
+
+                event.preventDefault();
+                event.stopPropagation();
+                event.stopImmediatePropagation();
             };
+
+            const events = [
+                "pointermove",
+                "mousemove",
+                "dragstart",
+                "pointerdown",
+                "mousedown",
+                "pointerup",
+                "mouseup"
+            ];
+
+            for (const eventName of events) {
+                window.addEventListener(eventName, mouseLockHandler, true);
+                document.addEventListener(eventName, mouseLockHandler, true);
+            }
+        }
+
+        function disableMouseLock() {
+            if (!mouseLockHandler) return;
+
+            const events = [
+                "pointermove",
+                "mousemove",
+                "dragstart",
+                "pointerdown",
+                "mousedown",
+                "pointerup",
+                "mouseup"
+            ];
+
+            for (const eventName of events) {
+                window.removeEventListener(eventName, mouseLockHandler, true);
+                document.removeEventListener(eventName, mouseLockHandler, true);
+            }
+
+            mouseLockHandler = null;
+        }
+
+        function tick() {
+            const context = getContext();
+            if (!context) return;
+
+            arenaRoot = context.root;
+
+            const threats = getThreats(context.root);
+            if (!threats.length) return;
+
+            const shieldWidth = getShieldWidth(context.shield);
+            const target = chooseTarget(threats, shieldWidth);
+            if (!target) return;
+
+            // Direct position update with dead-zone to prevent tiny oscillations
+            if (target.logicalCenter != null) {
+                const currentLeft = toNumber(context.shield.style.left);
+                const desiredLeft = target.logicalCenter - shieldWidth / 2;
+                const baseLeft = currentLeft == null ? desiredLeft : currentLeft;
+                const delta = desiredLeft - baseLeft;
+
+                if (Math.abs(delta) >= CONFIG.paladinDeadZonePx) {
+                    const nextLeft = baseLeft + delta * CONFIG.paladinSmoothing;
+                    context.shield.style.setProperty("left", `${nextLeft}px`, "important");
+                    context.shield.style.setProperty("transform", "none", "important");
+                }
+            }
+
+            // Pointer smoothing with dead-zone to reduce jitter
+            let x = target.clientCenter;
+            if (lastClientX == null) lastClientX = x;
+
+            const dx = x - lastClientX;
+            if (Math.abs(dx) < CONFIG.paladinPointerDeadZonePx) {
+                x = lastClientX;
+            } else {
+                x = lastClientX + dx * CONFIG.paladinPointerSmoothing;
+            }
+            lastClientX = x;
+
+            const y = context.rect.top + context.rect.height * CONFIG.paladinAimYRatio;
+
+            if (!dragActive) pointerDown(context, x, y);
+            pointerMove(context, x, y);
+        }
+
+        function frame() {
+            tick();
+            rafId = requestAnimationFrame(frame);
+        }
+
+        function start() {
+            if (rafId) return;
+
+            resetProjectileCache();
+            enableMouseLock();
+            rafId = requestAnimationFrame(frame);
+            log("[Paladin] Bot started", "#88aaff");
+        }
+
+        function stop() {
+            if (rafId) {
+                cancelAnimationFrame(rafId);
+                rafId = 0;
+            }
+
+            pointerUp();
+            disableMouseLock();
+            arenaRoot = null;
+            resetProjectileCache();
+        }
+
+        function onNodeAdded(node) {
+            if (runtime.mode !== MODE.PALADIN || !(node instanceof Element)) return;
+            if (node.matches?.(SELECTOR.paladinProjectile) || node.querySelector?.(SELECTOR.paladinProjectile)) {
+                tick();
+            }
         }
 
         return {
-            logicalCenter: a.logicalCenter,
-            clientCenter: a.clientCenter
+            getContext,
+            tick,
+            start,
+            stop,
+            onNodeAdded
         };
-    }
+    })();
 
-    function getPaladinInputTargets(ctx) {
-        return [ctx.shield, ctx.root, document, document.body, window];
-    }
+    const priestManager = (() => {
+        let rafId = 0;
+        let busy = false;
 
-    function paladinPointerDown(ctx, x, y) {
-        const base = { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y };
-        const m = { ...base, button: 0, buttons: 1 };
-        const p = { ...m, pointerId: 1, pointerType: "mouse", isPrimary: true };
-
-        for (const t of getPaladinInputTargets(ctx)) {
-            emitPointer(t, "pointerdown", p);
-            emitMouse(t, "mousedown", m);
+        function hasBoard() {
+            const board = q(SELECTOR.priestGrid) || q(SELECTOR.priestGame);
+            if (!board) return false;
+            const items = qa(SELECTOR.priestItem).filter(isVisible);
+            return items.length >= 3;
         }
 
-        state.palDrag = true;
-    }
+        function getGlyphSignature(tile) {
+            const glyphRoot =
+                q(SELECTOR.priestGlyph, tile) ||
+                q(".gridAssetFront__0dcd3 svg", tile) ||
+                q("svg", tile);
 
-    function paladinPointerMove(ctx, x, y) {
-        const base = { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y, buttons: 1 };
-        const p = { ...base, pointerId: 1, pointerType: "mouse", isPrimary: true };
+            if (!glyphRoot) return null;
 
-        for (const t of getPaladinInputTargets(ctx)) {
-            emitPointer(t, "pointermove", p);
-            emitMouse(t, "mousemove", base);
-        }
-    }
+            const paths = qa("path", glyphRoot).map((p) => p.getAttribute("d") || "").join("|");
+            if (paths && paths.length > 12) return paths;
 
-    function paladinPointerUp() {
-        if (!state.palDrag) return;
-
-        const root = state.palRoot;
-        const rect = root?.getBoundingClientRect();
-        const x = rect ? rect.left + rect.width / 2 : 0;
-        const y = rect ? rect.top + rect.height * CFG.palAimY : 0;
-
-        const base = { bubbles: true, cancelable: true, view: window, clientX: x, clientY: y };
-        const m = { ...base, button: 0, buttons: 0 };
-        const p = { ...m, pointerId: 1, pointerType: "mouse", isPrimary: true };
-
-        const targets = [root, document, document.body, window];
-        for (const t of targets) {
-            emitPointer(t, "pointerup", p);
-            emitMouse(t, "mouseup", m);
+            const html = (glyphRoot.innerHTML || "").replace(/\s+/g, "");
+            return html || null;
         }
 
-        state.palDrag = false;
-    }
+        function buildGroups() {
+            const tiles = qa(SELECTOR.priestItem).filter(
+                (tile) => isVisible(tile) && !tile.classList.contains(PRIEST_MATCHED_CLASS)
+            );
 
-    function mouseEventInsidePaladin(e) {
-        const root = state.palRoot;
-        if (!root) return true;
-        if (!("clientX" in e) || !("clientY" in e)) return true;
+            const groupsBySignature = new Map();
 
-        const r = root.getBoundingClientRect();
-        return e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
-    }
+            for (const tile of tiles) {
+                const signature = getGlyphSignature(tile);
+                if (!signature) continue;
 
-    function enableMouseLock() {
-        if (!CFG.blockRealMouse || state.mouseLockHandler) return;
-
-        state.mouseLockHandler = (e) => {
-            if (state.mode !== "paladin") return;
-            if (!e.isTrusted) return;
-            if (!mouseEventInsidePaladin(e)) return;
-
-            e.preventDefault();
-            e.stopPropagation();
-            e.stopImmediatePropagation();
-        };
-
-        const events = ["pointermove", "mousemove", "dragstart", "pointerdown", "mousedown", "pointerup", "mouseup"];
-        for (const ev of events) {
-            window.addEventListener(ev, state.mouseLockHandler, true);
-            document.addEventListener(ev, state.mouseLockHandler, true);
-        }
-    }
-
-    function disableMouseLock() {
-        if (!state.mouseLockHandler) return;
-
-        const events = ["pointermove", "mousemove", "dragstart", "pointerdown", "mousedown", "pointerup", "mouseup"];
-        for (const ev of events) {
-            window.removeEventListener(ev, state.mouseLockHandler, true);
-            document.removeEventListener(ev, state.mouseLockHandler, true);
-        }
-
-        state.mouseLockHandler = null;
-    }
-
-    function paladinTick() {
-        const ctx = getPaladinContext();
-        if (!ctx) return;
-
-        state.palRoot = ctx.root;
-
-        const threats = getProjectileThreats(ctx.root);
-        if (!threats.length) return;
-
-        const shieldW = getShieldWidthLogical(ctx.shield);
-        const target = choosePaladinTarget(threats, shieldW);
-        if (!target) return;
-
-        if (target.logicalCenter !== null) {
-            const currentLeft = num(ctx.shield.style.left);
-            const desiredLeft = target.logicalCenter - shieldW / 2;
-            const nextLeft =
-                currentLeft === null ? desiredLeft : currentLeft + (desiredLeft - currentLeft) * CFG.palSmooth;
-
-            ctx.shield.style.setProperty("left", `${nextLeft}px`, "important");
-            ctx.shield.style.setProperty("transform", "none", "important");
-        }
-
-        const x = target.clientCenter;
-        const y = ctx.rect.top + ctx.rect.height * CFG.palAimY;
-
-        if (!state.palDrag) paladinPointerDown(ctx, x, y);
-        paladinPointerMove(ctx, x, y);
-    }
-
-    function paladinLoop() {
-        paladinTick();
-        state.palRaf = requestAnimationFrame(paladinLoop);
-    }
-
-    function startPaladinBot() {
-        if (state.palRaf) return;
-        resetPaladinProjectileCache();
-        enableMouseLock();
-        state.palRaf = requestAnimationFrame(paladinLoop);
-        console.log("%c[Paladin] Bot started", "color:#88aaff;font-weight:bold");
-    }
-
-    function stopPaladinBot() {
-        if (state.palRaf) {
-            cancelAnimationFrame(state.palRaf);
-            state.palRaf = 0;
-        }
-        paladinPointerUp();
-        disableMouseLock();
-        resetPaladinProjectileCache();
-        state.palRoot = null;
-    }
-
-    // ---------- Priest ----------
-    function getPriestGlyphSignature(tile) {
-        const glyphRoot = q(SEL.priestGlyph, tile) || q(".gridAssetFront__0dcd3 svg", tile) || q("svg", tile);
-        if (!glyphRoot) return null;
-
-        const paths = qa("path", glyphRoot).map((p) => p.getAttribute("d") || "").join("|");
-        if (paths && paths.length > 12) return paths;
-
-        const html = (glyphRoot.innerHTML || "").replace(/\s+/g, "");
-        return html || null;
-    }
-
-    function buildPriestGroups() {
-        const items = qa(SEL.priestItem).filter((el) => isVisible(el) && !el.classList.contains(PRIEST_MATCHED_CLASS));
-        const bySig = new Map();
-
-        for (const item of items) {
-            const sig = getPriestGlyphSignature(item);
-            if (!sig) continue;
-            if (!bySig.has(sig)) bySig.set(sig, []);
-            bySig.get(sig).push(item);
-        }
-
-        return Array.from(bySig.values())
-            .filter((g) => g.length >= 3)
-            .map((g) => g.slice(0, 3));
-    }
-
-    async function solvePriestBoardOnce() {
-        if (state.priestBusy || state.mode !== "priest") return;
-        state.priestBusy = true;
-
-        try {
-            const groups = buildPriestGroups();
-            if (!groups.length) return;
-
-            for (const group of groups) {
-                if (state.mode !== "priest") break;
-
-                const live = group.filter(
-                    (el) => document.contains(el) && isVisible(el) && !el.classList.contains(PRIEST_MATCHED_CLASS)
-                );
-                if (live.length < 3) continue;
-
-                for (const tile of live) {
-                    if (state.mode !== "priest") break;
-                    hardClick(tile);
-                    await sleep(CFG.priestClickDelayMs);
-                }
-
-                await sleep(CFG.priestTripletDelayMs);
+                if (!groupsBySignature.has(signature)) groupsBySignature.set(signature, []);
+                groupsBySignature.get(signature).push(tile);
             }
-        } finally {
-            state.priestBusy = false;
+
+            return Array.from(groupsBySignature.values())
+                .filter((group) => group.length >= 3)
+                .map((group) => group.slice(0, 3));
         }
-    }
 
-    function priestTick() {
-        if (state.mode !== "priest") return;
-        if (!hasPriestBoard()) return;
-        solvePriestBoardOnce();
-    }
+        async function solveOnce() {
+            if (busy || runtime.mode !== MODE.PRIEST) return;
+            busy = true;
 
-    function priestLoop() {
-        priestTick();
-        state.priestRaf = requestAnimationFrame(priestLoop);
-    }
+            try {
+                const groups = buildGroups();
+                if (!groups.length) return;
 
-    function startPriestBot() {
-        if (state.priestRaf) return;
-        state.priestBusy = false;
-        state.priestRaf = requestAnimationFrame(priestLoop);
-        console.log("%c[Priest] Bot started", "color:#a3ffcc;font-weight:bold");
-    }
+                for (const group of groups) {
+                    if (runtime.mode !== MODE.PRIEST) break;
 
-    function stopPriestBot() {
-        if (state.priestRaf) {
-            cancelAnimationFrame(state.priestRaf);
-            state.priestRaf = 0;
+                    const liveTiles = group.filter(
+                        (tile) =>
+                            document.contains(tile) &&
+                            isVisible(tile) &&
+                            !tile.classList.contains(PRIEST_MATCHED_CLASS)
+                    );
+
+                    if (liveTiles.length < 3) continue;
+
+                    for (const tile of liveTiles) {
+                        if (runtime.mode !== MODE.PRIEST) break;
+                        hardClick(tile);
+                        await sleep(CONFIG.priestClickDelayMs);
+                    }
+
+                    await sleep(CONFIG.priestTripletDelayMs);
+                }
+            } finally {
+                busy = false;
+            }
         }
-        state.priestBusy = false;
+
+        function tick() {
+            if (runtime.mode !== MODE.PRIEST) return;
+            if (!hasBoard()) return;
+            solveOnce();
+        }
+
+        function frame() {
+            tick();
+            rafId = requestAnimationFrame(frame);
+        }
+
+        function start() {
+            if (rafId) return;
+            busy = false;
+            rafId = requestAnimationFrame(frame);
+            log("[Priest] Bot started", "#a3ffcc");
+        }
+
+        function stop() {
+            if (rafId) {
+                cancelAnimationFrame(rafId);
+                rafId = 0;
+            }
+            busy = false;
+        }
+
+        function onNodeAdded(node) {
+            if (runtime.mode !== MODE.PRIEST || !(node instanceof Element)) return;
+
+            if (
+                node.matches?.(SELECTOR.priestItem) ||
+                node.matches?.(SELECTOR.priestGrid) ||
+                node.querySelector?.(SELECTOR.priestItem)
+            ) {
+                tick();
+            }
+        }
+
+        return {
+            hasBoard,
+            tick,
+            start,
+            stop,
+            onNodeAdded
+        };
+    })();
+
+    function detectBattleMode() {
+        if (paladinManager.getContext()) return MODE.PALADIN;
+        if (priestManager.hasBoard()) return MODE.PRIEST;
+        if (qa(SELECTOR.rangerTarget).some(isVisible)) return MODE.RANGER;
+
+        // Fallback Ranger detection via activity asset
+        for (const wrapper of qa(SELECTOR.activityButton)) {
+            const img = wrapper.querySelector("img.activityButtonAsset__8af73, img.asset__65fca");
+            if (img && img.src && img.src.includes(HASH.RANGER)) return MODE.RANGER;
+        }
+
+        return MODE.IDLE;
     }
 
-    // ---------- Mode switch ----------
-    function checkBattleMode() {
-        const mode = getBattleType();
-        if (mode === state.mode) return;
+    function applyMode(nextMode) {
+        if (nextMode === runtime.mode) return;
+        runtime.mode = nextMode;
 
-        state.mode = mode;
-
-        if (mode === "paladin") {
-            stopPriestBot();
-            startPaladinBot();
-            console.log("%c[Battle] PALADIN mode", "color:#88aaff;font-weight:bold");
+        if (nextMode === MODE.PALADIN) {
+            priestManager.stop();
+            paladinManager.start();
+            log("[Battle] PALADIN mode", "#88aaff");
             return;
         }
 
-        if (mode === "priest") {
-            stopPaladinBot();
-            startPriestBot();
-            console.log("%c[Battle] PRIEST mode", "color:#a3ffcc;font-weight:bold");
+        if (nextMode === MODE.PRIEST) {
+            paladinManager.stop();
+            priestManager.start();
+            log("[Battle] PRIEST mode", "#a3ffcc");
             return;
         }
 
-        stopPaladinBot();
-        stopPriestBot();
+        paladinManager.stop();
+        priestManager.stop();
 
-        if (mode === "ranger") {
-            console.log("%c[Battle] RANGER mode", "color:#00ff88;font-weight:bold");
+        if (nextMode === MODE.RANGER) {
+            log("[Battle] RANGER mode", "#00ff88");
         }
     }
 
-    // ---------- Observer ----------
-    const observer = new MutationObserver((muts) => {
-        tryClickGoBackModal();
-        checkBattleMode();
+    function handleAddedNode(node) {
+        if (!(node instanceof Element)) return;
 
-        for (const m of muts) {
-            for (const node of m.addedNodes) {
-                if (!(node instanceof Element)) continue;
+        rangerManager.onNodeAdded(node);
+        craftManager.onNodeAdded(node);
+        paladinManager.onNodeAdded(node);
+        priestManager.onNodeAdded(node);
 
-                if (node.matches?.(SEL.target)) tryTarget(node);
-                node.querySelectorAll?.(SEL.target).forEach(tryTarget);
-
-                const seq = node.matches?.(SEL.seq) ? node : node.querySelector?.(SEL.seq);
-                if (seq) doSequence(seq);
-
-                if (node.matches?.(SEL.cont) || node.querySelector?.(SEL.cont)) tryContinue();
-
-                // Fast reaction Paladin
-                if (state.mode === "paladin") {
-                    if (node.matches?.(SEL.projectile) || node.querySelector?.(SEL.projectile)) {
-                        paladinTick();
-                    }
-                }
-
-                // Fast reaction Priest
-                if (state.mode === "priest") {
-                    if (
-                        node.matches?.(SEL.priestItem) ||
-                        node.matches?.(SEL.priestGrid) ||
-                        node.querySelector?.(SEL.priestItem)
-                    ) {
-                        priestTick();
-                    }
-                }
-            }
-
-            if (m.type === "childList" && m.target instanceof Element) {
-                if (m.target.closest?.(SEL.seq) || m.target.matches?.(SEL.seq)) {
-                    doSequence(m.target.closest(SEL.seq) || m.target);
-                }
-            }
+        if (node.matches?.(SELECTOR.continueButton) || node.querySelector?.(SELECTOR.continueButton)) {
+            continueManager.tick();
         }
-    });
+    }
 
-    observer.observe(document.body, { childList: true, subtree: true });
+    function setupObserver() {
+        const observer = new MutationObserver((mutations) => {
+            modalManager.tick();
+            applyMode(detectBattleMode());
 
-    // ---------- Poll ----------
-    const poll = setInterval(() => {
-        tryClickGoBackModal();
-        checkBattleMode();
+            for (const mutation of mutations) {
+                for (const node of mutation.addedNodes) {
+                    handleAddedNode(node);
+                }
 
-        qa(SEL.target).forEach(tryTarget);
+                if (mutation.type === "childList" && mutation.target instanceof Element) {
+                    if (mutation.target.closest?.(SELECTOR.craftSequences) || mutation.target.matches?.(SELECTOR.craftSequences)) {
+                        craftManager.tick();
+                    }
+                }
+            }
+        });
 
-        const seq = q(SEL.seq);
-        if (seq) doSequence(seq);
-        else state.lastSeqKey = "";
+        observer.observe(document.body, { childList: true, subtree: true });
+        runtime.observer = observer;
+    }
 
-        if (state.mode === "priest") priestTick();
+    function pollTick() {
+        modalManager.tick();
+        applyMode(detectBattleMode());
 
-        tryContinue();
-    }, CFG.pollMs);
+        rangerManager.tick();
+        craftManager.tick();
 
-    // ---------- Stop ----------
-    window.stopBot = () => {
-        clearInterval(dragonBot);
-        clearInterval(activityBot);
-        clearInterval(goBackBot);
-        clearInterval(poll);
+        if (runtime.mode === MODE.PRIEST) {
+            priestManager.tick();
+        }
 
-        stopPaladinBot();
-        stopPriestBot();
-        observer.disconnect();
+        continueManager.tick();
+    }
 
-        console.log("%c[BOT] Stopped", "color:red;font-weight:bold");
-    };
+    function stopAll() {
+        clearAllIntervals();
 
-    // ---------- Init ----------
-    checkBattleMode();
+        if (runtime.observer) {
+            runtime.observer.disconnect();
+            runtime.observer = null;
+        }
 
-    const initSeq = q(SEL.seq);
-    if (initSeq) doSequence(initSeq);
+        paladinManager.stop();
+        priestManager.stop();
 
-    tryClickGoBackModal();
-    tryContinue();
+        log("[BOT] Stopped", "red");
+    }
 
-    console.log("%c[The Last Meadow Auto Script] v1.0", "color:#00ff00;font-weight:bold;font-size:14px");
-    console.log("%cStop command: stopBot()", "color:#ff9900");
+    // Public stop API
+    window.stopBot = stopAll;
+
+    // Interval setup
+    addInterval(() => {
+        const grassToucher = q(".dragonClickable__8e80e") || q('img[alt="Grass Toucher"]');
+        if (grassToucher) grassToucher.click();
+    }, CONFIG.dragonClickIntervalMs);
+
+    addInterval(() => {
+        for (const wrapper of qa(SELECTOR.activityButton)) {
+            if (q(SELECTOR.activityCooldown, wrapper)) continue;
+            q(SELECTOR.clickable, wrapper)?.click();
+        }
+    }, CONFIG.activityClickIntervalMs);
+
+    addInterval(() => modalManager.tick(), CONFIG.modalScanIntervalMs);
+    addInterval(() => pollTick(), CONFIG.pollIntervalMs);
+
+    setupObserver();
+
+    // Initial pass
+    pollTick();
+    continueManager.tick();
+    modalManager.tick();
+
+    log("[The Last Meadow Auto Script] v2.0", "#00ff00");
+    log("Stop command: stopBot()", "#ff9900");
 })();
   ```
   
