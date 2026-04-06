@@ -32,11 +32,11 @@ Automation script for The Last Meadow mini-games inside Discord.
    - Android Kiwi Browser: Install extension in browser settings
 
 2. **Install Script**:
-   - **[🚀 Install Last Meadow Auto Script](https://raw.githubusercontent.com/REALMWTH/Discord-The-Last-Meadow-Auto-Script/refs/heads/main/last-meadow-auto.js)** ← Click to install automatically
+   - **[🚀 Install Last Meadow Auto Script](https://raw.githubusercontent.com/REALMWTH/Discord-The-Last-Meadow-Auto-Script/refs/heads/main/last-meadow-auto.user.js)** ← Click to install automatically
    
    OR
    
-   - Download/copy `last-meadow-auto.js` from GitHub
+   - Download/copy `last-meadow-auto.user.js` from GitHub
    - Open Tampermonkey dashboard
    - Select "Create New Script"
    - Paste entire script content (including `// ==UserScript==` header)
