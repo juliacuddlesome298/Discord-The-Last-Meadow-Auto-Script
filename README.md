@@ -16,7 +16,11 @@ Automation script for The Last Meadow mini-games inside Discord.
 
 ## Requirements
 
-- Discord client (or via browser at discord.com/app)
+- Browser with Tampermonkey (or alternative) support (discord.com/app)
+
+OR
+
+- Discord client (PC only, Console Paste method only)
 
 ## Installation Methods
 
