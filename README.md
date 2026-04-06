@@ -18,7 +18,36 @@ Automation script for The Last Meadow mini-games inside Discord.
 
 - Discord client (or via browser at discord.com/app)
 
-## Quick Start
+## Installation Methods
+
+### Method 1: Tampermonkey (or any alternative) (Recommended - Works on Desktop & Android) ⭐
+
+**Pros:** Works on both desktop and mobile (Android), automatic updates, no need to paste on page reload
+**Cons:** Supports only browsers
+
+1. **Install Tampermonkey** first if you don't have it:
+   - Firefox: https://addons.mozilla.org/firefox/addon/tampermonkey/
+   - Chrome/Edge: https://chrome.google.com/webstore/detail/tampermonkey/
+   - Android Lemur Browser: Install extension in browser settings
+   - Android Kiwi Browser: Install extension in browser settings
+
+2. **Install Script**:
+   - **[🚀 Install Last Meadow Auto Script](https://raw.githubusercontent.com/REALMWTH/Discord-The-Last-Meadow-Auto-Script/refs/heads/main/last-meadow-auto.js)** ← Click to install automatically
+   
+   OR
+   
+   - Download/copy `last-meadow-auto.js` from GitHub
+   - Open Tampermonkey dashboard
+   - Select "Create New Script"
+   - Paste entire script content (including `// ==UserScript==` header)
+   - Save (Ctrl+S)
+
+---
+
+### Method 2: Console Paste (Quick Test, Works on Desktop Only)
+
+**Pros:** No browser extensions needed, works in Discord client
+**Cons:** Need to paste after each page reload, desktop only
 
 1. Open Discord and navigate to The Last Meadow.
 2. Open Developer Tools. Windows/Linux: `Ctrl + Shift + I`. macOS: `Cmd + Option + I`.
@@ -1139,13 +1168,14 @@ Automation script for The Last Meadow mini-games inside Discord.
   
 </details>
 
-## Stop the Script
+## Stopping the Script
 
-Run this in Console:
+### Tampermonkey Method
+- Run in browser console: `stopBot()`
+- Or disable/delete script in Tampermonkey dashboard
 
-```js
-stopBot();
-```
+### Console Paste Method  
+- Run in browser console: `stopBot()`
 
 ## Notes
 

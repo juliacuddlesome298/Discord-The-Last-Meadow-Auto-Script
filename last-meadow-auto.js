@@ -6,6 +6,8 @@
 // @author       REALMWTH
 // @match        https://discordapp.com/channels/*
 // @match        https://discord.com/channels/*
+// @updateURL    https://raw.githubusercontent.com/REALMWTH/Discord-The-Last-Meadow-Auto-Script/refs/heads/main/last-meadow-auto.js
+// @downloadURL  https://raw.githubusercontent.com/REALMWTH/Discord-The-Last-Meadow-Auto-Script/refs/heads/main/last-meadow-auto.js
 // @grant        none
 // @run-at       document-end
 // ==/UserScript==
