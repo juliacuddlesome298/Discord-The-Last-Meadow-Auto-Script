@@ -27,7 +27,7 @@ Automation script for The Last Meadow mini-games inside Discord.
 
 1. **Install Tampermonkey** first if you don't have it:
    - Firefox: https://addons.mozilla.org/firefox/addon/tampermonkey/
-   - Chrome/Edge: https://chrome.google.com/webstore/detail/tampermonkey/
+   - Chrome/Edge: https://chromewebstore.google.com/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo
    - Android Lemur Browser: Install extension in browser settings
    - Android Kiwi Browser: Install extension in browser settings
 
