@@ -1,3 +1,7 @@
+> [!NOTE]
+> Grass Toucher is defeated, event is over ;)
+> Thanks everyone for participation! See you next time!
+
 # Discord The Last Meadow Auto Script
 
 Automation script for The Last Meadow mini-games inside Discord.
